@@ -8,6 +8,7 @@
 @import './styles/buttons.css';
 @import './styles/overlay.css';
 @import './styles/reframe.css';
+@import './styles/ytclipper.css';
 
 /* ═══════════════════════════════════════════════
    LEGACY — kept purely as fallback during migration.

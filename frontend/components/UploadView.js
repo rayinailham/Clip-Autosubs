@@ -92,7 +92,15 @@ export default {
       loadPreviousUploads();
     }
 
-    onMounted(loadPreviousUploads);
+    onMounted(async () => {
+      await loadPreviousUploads();
+      // Auto-transcribe a clip that came from the YouTube Clip Finder
+      if (store.yt && store.yt.prefillFile) {
+        const filename = store.yt.prefillFile;
+        store.yt.prefillFile = '';
+        await transcribeExisting(encodeURIComponent(filename));
+      }
+    });
 
     return {
       store, uploads, uploadsLoading, dragover,

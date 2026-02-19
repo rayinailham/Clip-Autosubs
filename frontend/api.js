@@ -112,3 +112,42 @@ export async function pollReframeStatus(jobId) {
   const res = await fetch('/reframe-status/' + jobId);
   return res.json();
 }
+
+// ── YouTube Clip Finder ──────────────────────────────────────
+
+export async function ytAnalyze(url, criteria, geminiApiKey) {
+  const res = await fetch('/yt-clip/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, criteria, gemini_api_key: geminiApiKey }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Analyze request failed');
+  }
+  return res.json();
+}
+
+export async function ytPollAnalyze(jobId) {
+  const res = await fetch('/yt-clip/analyze-status/' + jobId);
+  return res.json();
+}
+
+export async function ytCut(url, clips) {
+  const res = await fetch('/yt-clip/cut', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, clips }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Cut request failed');
+  }
+  return res.json();
+}
+
+export async function ytPollCut(jobId) {
+  const res = await fetch('/yt-clip/cut-status/' + jobId);
+  return res.json();
+}
+

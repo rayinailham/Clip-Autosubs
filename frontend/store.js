@@ -6,7 +6,7 @@ import { reactive } from 'vue';
 
 const store = reactive({
   // ── App Mode ─────────────────────────────
-  appMode: 'home', // 'home' | 'subtitle' | 'vtuber'
+  appMode: 'home', // 'home' | 'subtitle' | 'vtuber' | 'ytclipper'
 
   // ── Navigation ──────────────────────────
   currentView: 'upload', // 'upload' | 'editor'
@@ -112,7 +112,13 @@ const store = reactive({
       downloadUrl: '',
       downloadLabel: '',
     },
-  },});
+  },
+
+  // ── YouTube Clipper ───────────────────────
+  yt: {
+    prefillFile: '', // filename to auto-load in upload view after clipping
+  },
+});
 
 export default store;
 

@@ -13,7 +13,11 @@ export default {
       store.appMode = 'vtuber';
     }
 
-    return { goSubtitle, goVtuber };
+    function goYtClipper() {
+      store.appMode = 'ytclipper';
+    }
+
+    return { goSubtitle, goVtuber, goYtClipper };
   },
   template: `
     <div class="home-view">
@@ -55,6 +59,23 @@ export default {
             <span class="tag">Pan &amp; zoom</span>
           </div>
           <button class="btn btn-accent home-card-btn">Get Started →</button>
+        </div>
+
+        <!-- YouTube Clip Finder card -->
+        <div class="home-card home-card--ytclipper" @click="goYtClipper">
+          <div class="home-card-icon">🎬</div>
+          <h2 class="home-card-title">YouTube Clip Finder</h2>
+          <p class="home-card-desc">
+            Paste a YouTube link, describe what you're looking for, and let
+            Gemini AI find the best moments. Clips get cut and sent straight
+            to the subtitle workflow.
+          </p>
+          <div class="home-card-tags">
+            <span class="tag">yt-dlp</span>
+            <span class="tag">Gemini AI</span>
+            <span class="tag">Auto-clip</span>
+          </div>
+          <button class="btn btn-yt home-card-btn">Get Started →</button>
         </div>
 
       </div>

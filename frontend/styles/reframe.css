@@ -33,10 +33,10 @@
 .home-cards {
   display: flex;
   gap: 1.75rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: center;
   width: 100%;
-  max-width: 860px;
+  max-width: 1200px;
 }
 
 .home-card {
@@ -44,7 +44,8 @@
   border: 1.5px solid var(--border);
   border-radius: var(--radius);
   padding: 2rem 1.75rem;
-  width: 360px;
+  flex: 1 1 0;
+  min-width: 0;
   cursor: pointer;
   display: flex;
   flex-direction: column;

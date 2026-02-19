@@ -14,3 +14,7 @@ python-multipart
 
 # --- Utilities ---
 ffmpeg-python
+
+# --- YouTube Clip Finder ---
+yt-dlp
+google-genai

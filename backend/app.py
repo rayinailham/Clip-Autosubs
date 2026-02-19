@@ -28,6 +28,7 @@ from reframe_renderer import render_vtuber_short
 from silence_cutter import cut_silence
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
+from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
 
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -57,6 +58,10 @@ cut_silence_jobs: dict = {}
 
 # ─── In-memory reframe job tracker ───────────────────────────
 reframe_jobs: dict = {}
+
+# ─── In-memory YT Clipper job trackers ───────────────────────
+yt_analyze_jobs: dict = {}
+yt_cut_jobs: dict = {}
 
 
 # ─── Pydantic Models ────────────────────────────────────────
@@ -168,6 +173,25 @@ class RenderRequest(BaseModel):
     words: list[WordItem]
     word_groups: Optional[list[WordGroup]] = None  # Custom groups with timing control
     style: StyleConfig = StyleConfig()
+
+
+class YtAnalyzeRequest(BaseModel):
+    url: str
+    criteria: str = ""          # empty → auto (find all clippable moments)
+    gemini_api_key: str         # required — user provides it each time, never stored
+
+
+class YtClip(BaseModel):
+    id: int
+    title: str
+    start: float
+    end: float
+    reason: str = ""
+
+
+class YtCutRequest(BaseModel):
+    url: str
+    clips: list[YtClip]
 
 
 # ─── Routes ──────────────────────────────────────────────────
@@ -632,6 +656,104 @@ async def get_reframe_status(job_id: str):
     if job_id not in reframe_jobs:
         raise HTTPException(status_code=404, detail="Reframe job not found")
     return reframe_jobs[job_id]
+
+
+# ─── YT Clipper ───────────────────────────────────────────────
+
+
+def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str):
+    """Background task: extract transcript + Gemini analysis."""
+    try:
+        yt_analyze_jobs[job_id] = {"status": "extracting", "message": "Extracting captions from YouTube…"}
+        transcript_data = extract_transcript(url)
+
+        yt_analyze_jobs[job_id] = {"status": "analyzing", "message": "Sending transcript to Gemini AI…"}
+        clips = analyze_with_gemini(transcript_data, criteria, api_key)
+
+        yt_analyze_jobs[job_id] = {
+            "status": "done",
+            "message": f"Found {len(clips)} clip(s).",
+            "video_title": transcript_data["video_title"],
+            "video_duration": transcript_data["video_duration"],
+            "clips": clips,
+        }
+    except Exception as e:
+        print(f"[yt-analyze] Error: {e}")
+        yt_analyze_jobs[job_id] = {"status": "error", "message": str(e)}
+
+
+@app.post("/yt-clip/analyze")
+async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTasks):
+    """Start background job: extract YT captions → Gemini analysis → proposed clips."""
+    if not req.gemini_api_key.strip():
+        raise HTTPException(status_code=400, detail="Gemini API key is required.")
+    job_id = uuid.uuid4().hex[:8]
+    yt_analyze_jobs[job_id] = {"status": "queued", "message": "Queued…"}
+    background_tasks.add_task(_do_yt_analyze, job_id, req.url, req.criteria, req.gemini_api_key.strip())
+    return {"job_id": job_id}
+
+
+@app.get("/yt-clip/analyze-status/{job_id}")
+async def yt_clip_analyze_status(job_id: str):
+    """Poll the status of a YT analyze job."""
+    if job_id not in yt_analyze_jobs:
+        raise HTTPException(status_code=404, detail="Analyze job not found")
+    return yt_analyze_jobs[job_id]
+
+
+def _do_yt_cut(job_id: str, url: str, clips: list[dict]):
+    """Background task: download video + cut all selected clips."""
+    try:
+        total = len(clips)
+
+        def progress(stage: str, pct: int):
+            if stage == "downloading":
+                yt_cut_jobs[job_id] = {
+                    "status": "downloading",
+                    "message": f"Downloading video… {pct}%",
+                    "progress": int(pct * 0.7),  # download = 0–70%
+                    "clips": [],
+                }
+            elif stage == "cutting":
+                yt_cut_jobs[job_id] = {
+                    "status": "cutting",
+                    "message": f"Cutting clips… {pct}%",
+                    "progress": 70 + int(pct * 0.3),  # cutting = 70–100%
+                    "clips": yt_cut_jobs[job_id].get("clips", []),
+                }
+
+        yt_cut_jobs[job_id] = {"status": "downloading", "message": "Starting download…", "progress": 0, "clips": []}
+        results = download_and_cut_clips(url, clips, UPLOAD_DIR, progress_cb=progress)
+
+        yt_cut_jobs[job_id] = {
+            "status": "done",
+            "message": f"✅ {len(results)} clip(s) saved to uploads folder.",
+            "progress": 100,
+            "clips": results,
+        }
+    except Exception as e:
+        print(f"[yt-cut] Error: {e}")
+        yt_cut_jobs[job_id] = {"status": "error", "message": str(e), "progress": 0, "clips": []}
+
+
+@app.post("/yt-clip/cut")
+async def yt_clip_cut(req: YtCutRequest, background_tasks: BackgroundTasks):
+    """Start background job: download video → cut selected clips → save to uploads/."""
+    if not req.clips:
+        raise HTTPException(status_code=400, detail="No clips provided.")
+    clips_dict = [c.model_dump() for c in req.clips]
+    job_id = uuid.uuid4().hex[:8]
+    yt_cut_jobs[job_id] = {"status": "queued", "message": "Queued…", "progress": 0, "clips": []}
+    background_tasks.add_task(_do_yt_cut, job_id, req.url, clips_dict)
+    return {"job_id": job_id}
+
+
+@app.get("/yt-clip/cut-status/{job_id}")
+async def yt_clip_cut_status(job_id: str):
+    """Poll the status of a YT cut job."""
+    if job_id not in yt_cut_jobs:
+        raise HTTPException(status_code=404, detail="Cut job not found")
+    return yt_cut_jobs[job_id]
 
 
 # ─── Static Files ──────────────────────────────────────────
