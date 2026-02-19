@@ -1,0 +1,16 @@
+# =============================================
+# Clipping Project - Phase 1: Transcription
+# =============================================
+# Python 3.11 | CUDA 12.8 | RTX 3060 6GB VRAM
+# =============================================
+
+# --- Core ML ---
+whisperx
+
+# --- Web Server ---
+fastapi[standard]
+uvicorn[standard]
+python-multipart
+
+# --- Utilities ---
+ffmpeg-python

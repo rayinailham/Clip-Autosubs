@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clipping Project — Dynamic Subtitles</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══ Header ═══ -->
+<header>
+  <h1>Clipping Project</h1>
+  <div class="status-pills">
+    <div class="pill" id="gpu-pill">
+      <span class="dot" id="gpu-dot"></span>
+      <span id="gpu-label">Checking GPU…</span>
+    </div>
+    <div class="pill" id="ffmpeg-pill">
+      <span class="dot" id="ffmpeg-dot"></span>
+      <span id="ffmpeg-label">FFmpeg…</span>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ Upload View ═══ -->
+<div id="upload-view" class="view active">
+  <div class="upload-card" id="upload-card">
+    <input type="file" id="file-input"
+           accept=".mp4,.mkv,.avi,.mov,.webm,.mp3,.wav,.flac,.m4a,.ogg" />
+    <div class="upload-icon">🎬</div>
+    <h2>Drop a video or audio file</h2>
+    <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV — up to 500 MB</p>
+  </div>
+  <div class="transcribe-progress" id="transcribe-progress">
+    <div class="progress-box">
+      <div class="progress-label">
+        <span id="progress-text">Transcribing…</span>
+        <span id="progress-file"></span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Editor View ═══ -->
+<div id="editor-view" class="view">
+  <!-- Main Area: Video + Transcript -->
+  <div class="main-area">
+    <!-- Video + Subtitle Preview -->
+    <div class="video-panel" id="video-container">
+      <div class="subtitle-container" id="subtitle-box">
+          <video id="editor-video" controls></video>
+          <div class="subtitle-overlay pos-bottom" id="subtitle-preview"></div>
+      </div>
+    </div>
+    
+    <!-- Editable Transcript -->
+    <div class="transcript-panel">
+      <div class="transcript-header">
+        <h3>📝 Transcript</h3>
+        <span class="transcript-meta" id="word-count"></span>
+      </div>
+      <div class="transcript-toolbar">
+        <button class="toolbar-btn undo-btn" id="undo-btn" onclick="undoAction()" disabled title="Undo last action">
+          ↩ Undo <span class="undo-count" id="undo-count" style="display:none">0</span>
+        </button>
+        <div class="toolbar-separator"></div>
+        <button class="toolbar-btn merge-btn" id="merge-btn" onclick="mergeSelectedWords()" disabled title="Select 2+ adjacent words to merge">
+          ⛓ Merge Words
+        </button>
+      </div>
+      <div class="word-list" id="word-list"></div>
+      <div class="transcript-footer">
+        <button class="btn btn-outline btn-sm" onclick="newTranscription()">⬆ New File</button>
+        <span style="flex:1"></span>
+        <span style="font-size:0.7rem; color:var(--text-dim);">Click to seek • Dbl-click to edit • Shift+click to select range</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="sidebar-tab active" data-tab="style" onclick="switchTab('style')">🎨 Style</button>
+      <button class="sidebar-tab" data-tab="groups" onclick="switchTab('groups')">📦 Groups</button>
+    </div>
+    
+    <div class="sidebar-content">
+      <!-- Style Tab -->
+      <div class="tab-panel active" id="tab-style">
+        <!-- Font Section -->
+        <div class="style-section">
+          <div class="style-section-title">Font</div>
+          <div class="style-row">
+            <label>Family</label>
+            <select id="ctrl-fontfamily">
+              <option value="Impact">Impact</option>
+              <option value="Arial Black">Arial Black</option>
+              <option value="Bebas Neue">Bebas Neue</option>
+              <option value="Montserrat">Montserrat</option>
+              <option value="Roboto">Roboto</option>
+              <option value="Open Sans">Open Sans</option>
+              <option value="Oswald">Oswald</option>
+              <option value="Anton">Anton</option>
+              <option value="Poppins">Poppins</option>
+              <option value="Lato">Lato</option>
+            </select>
+          </div>
+          <div class="style-row">
+            <label>Size</label>
+            <input type="range" min="20" max="200" value="80" id="ctrl-fontsize" />
+            <span class="range-val" id="val-fontsize">80</span>
+          </div>
+          <div class="style-row">
+            <label>Bold</label>
+            <input type="checkbox" checked id="ctrl-bold" />
+            <span style="width:20px"></span>
+            <label>Italic</label>
+            <input type="checkbox" id="ctrl-italic" />
+          </div>
+          <div class="style-row">
+            <label>UPPER</label>
+            <input type="checkbox" checked id="ctrl-uppercase" />
+          </div>
+        </div>
+        
+        <!-- Colors Section -->
+        <div class="style-section">
+          <div class="style-section-title">Colors</div>
+          <div class="style-row">
+            <label>Highlight</label>
+            <input type="color" value="#FFD700" id="ctrl-highlight" />
+            <label style="margin-left:0.5rem">Normal</label>
+            <input type="color" value="#FFFFFF" id="ctrl-textcolor" />
+          </div>
+          <div class="style-row">
+            <label>Outline</label>
+            <input type="color" value="#000000" id="ctrl-outlinecolor" />
+            <label style="margin-left:0.5rem">Shadow</label>
+            <input type="color" value="#000000" id="ctrl-shadowcolor" />
+          </div>
+        </div>
+        
+        <!-- Effects Section -->
+        <div class="style-section">
+          <div class="style-section-title">Effects</div>
+          <div class="style-row">
+            <label>Outline</label>
+            <input type="range" min="0" max="12" value="4" id="ctrl-outline" />
+            <span class="range-val" id="val-outline">4</span>
+          </div>
+          <div class="style-row">
+            <label>Shadow</label>
+            <input type="range" min="0" max="10" value="2" id="ctrl-shadow" />
+            <span class="range-val" id="val-shadow">2</span>
+          </div>
+          <div class="style-row">
+            <label>Scale %</label>
+            <input type="range" min="100" max="150" value="115" id="ctrl-scale" />
+            <span class="range-val" id="val-scale">115</span>
+          </div>
+          <div class="style-row">
+            <label>Animation</label>
+            <select id="ctrl-animation">
+              <option value="scale" selected>Scale</option>
+              <option value="bounce">Bounce</option>
+              <option value="fade">Fade</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+        </div>
+        
+        <!-- Position Section -->
+        <div class="style-section">
+          <div class="style-section-title">Position</div>
+          <div class="style-row">
+            <label>Vertical</label>
+            <select id="ctrl-position">
+              <option value="bottom" selected>Bottom</option>
+              <option value="center">Center</option>
+              <option value="top">Top</option>
+            </select>
+          </div>
+          <div class="style-row">
+            <label>Margin V</label>
+            <input type="range" min="0" max="200" value="60" id="ctrl-marginv" />
+            <span class="range-val" id="val-marginv">60</span>
+          </div>
+          <div class="style-row">
+            <label>Margin H</label>
+            <input type="range" min="0" max="200" value="10" id="ctrl-marginh" />
+            <span class="range-val" id="val-marginh">10</span>
+          </div>
+        </div>
+        
+        <!-- Per-Word Style Panel -->
+        <div class="word-style-panel hidden" id="word-style-panel">
+          <div class="word-style-header">
+            <h4>Word Style Override</h4>
+            <button class="btn btn-outline btn-sm" onclick="clearWordStyles()">Clear</button>
+          </div>
+          <div class="selected-words-info" id="selected-words-info">No words selected</div>
+          <div class="style-row">
+            <label>Highlight</label>
+            <input type="color" value="#FFD700" id="word-highlight" />
+          </div>
+          <div class="style-row">
+            <label>Normal</label>
+            <input type="color" value="#FFFFFF" id="word-normal" />
+          </div>
+          <div class="style-row">
+            <label>Font Size</label>
+            <input type="number" value="" placeholder="–" id="word-fontsize" />
+          </div>
+          <div class="style-row">
+            <label>Outline</label>
+            <input type="color" value="#000000" id="word-outline" />
+          </div>
+          <div class="style-row">
+            <button class="btn btn-primary btn-sm" onclick="applyWordStyle()" style="width:100%">Apply to Selected</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Groups Tab -->
+      <div class="tab-panel" id="tab-groups">
+        <div class="groups-header">
+          <h4>Word Groups</h4>
+          <div class="groups-mode-toggle">
+            <button class="active" id="mode-auto" onclick="setGroupMode('auto')">Auto</button>
+            <button id="mode-custom" onclick="setGroupMode('custom')">Custom</button>
+          </div>
+        </div>
+        
+        <!-- Auto mode controls -->
+        <div id="auto-group-controls">
+          <div class="style-row">
+            <label>Words/group</label>
+            <input type="range" min="1" max="10" value="4" id="ctrl-wpg" />
+            <span class="range-val" id="val-wpg">4</span>
+          </div>
+        </div>
+        
+        <!-- Custom mode controls -->
+        <div id="custom-group-controls" style="display:none;">
+          <div style="margin-bottom:0.75rem; display:flex; gap:0.5rem;">
+            <button class="btn btn-outline btn-sm" onclick="autoGenerateGroups()">Reset to Auto</button>
+          </div>
+          <div class="group-list" id="group-list"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Bar -->
+  <div class="bottom-bar">
+    <button class="btn btn-primary" id="render-btn" onclick="startRender()">
+      🎬 Render Video
+    </button>
+  </div>
+</div>
+
+<!-- ═══ Render Overlay ═══ -->
+<div class="render-overlay" id="render-overlay">
+  <div class="render-modal">
+    <h3 id="render-title">Rendering…</h3>
+    <div class="progress-track" style="margin-top: 1rem;">
+      <div class="progress-fill" id="render-progress-fill"></div>
+    </div>
+    <div class="render-status" id="render-status-text">Generating subtitles…</div>
+    <div class="download-area" id="download-area" style="display:none;">
+      <a id="download-link" class="btn btn-success" download>📥 Download Video</a>
+      <br/><br/>
+      <button class="btn btn-outline" onclick="closeRenderOverlay()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<script src="script.js"></script>
+</body>
+</html>
