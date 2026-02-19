@@ -7,12 +7,15 @@ export default {
   setup() {
     const videoEl = ref(null);
     let timeUpdateHandler = null;
+    let lastGroupKey = null;  // track group changes for entrance animations
 
     function onTimeUpdate() {
       if (!videoEl.value) return;
       const t = videoEl.value.currentTime;
       const s = store.style;
       const upper = s.uppercase;
+      const italic = s.italic;
+      const bold = s.bold;
       const highlightColor = s.highlight;
       const textColor = s.textColor;
       const fontSizeASS = s.fontSize || 80;
@@ -21,7 +24,7 @@ export default {
       const glowStrength = s.glow || 0;
       const glowColor = s.glowColor;
       const outlineColor = s.outlineColor;
-      const outlineWidth = s.outline || 4;
+      const outlineWidth = (s.outline !== undefined) ? s.outline : 4;
       const groups = getActiveGroups();
 
       const ve = videoEl.value;
@@ -29,15 +32,63 @@ export default {
       const actualHeight = ve.videoHeight || store.metadata.height || 1080;
       const scaledFontSize = (fontSizeASS * displayedHeight / actualHeight) + 'px';
 
-      const scaledOutline = Math.max(1, Math.round(outlineWidth * displayedHeight / actualHeight / 2));
-      const scaledGlow = Math.round(glowStrength * displayedHeight / actualHeight);
-      let textShadow = `${scaledOutline}px ${scaledOutline}px 0 ${outlineColor}, ` +
-                        `-${scaledOutline}px -${scaledOutline}px 0 ${outlineColor}, ` +
-                        `${scaledOutline}px -${scaledOutline}px 0 ${outlineColor}, ` +
-                        `-${scaledOutline}px ${scaledOutline}px 0 ${outlineColor}`;
-      if (glowStrength > 0) {
-        textShadow += `, 0 0 ${scaledGlow}px ${glowColor}, 0 0 ${scaledGlow * 2}px ${glowColor}`;
+      const shadowDepth = s.shadow || 0;
+      const shadowColor = s.shadowColor || '#000000';
+
+      /* 
+         Fix for outline/glow visibility:
+         1. Ensure we don't default s.outline=0 to 4.
+         2. Ensure scaled values are substantial enough to be seen.
+            We'll use a minimum of 0 so we can turn it off, but if >0, we scale it.
+            We shouldn't divide by 2 aggressively if user wants thick outline.
+      */
+      const ratio = displayedHeight / actualHeight;
+      const scaledOutline = outlineWidth > 0 ? Math.max(1, Math.round(outlineWidth * ratio)) : 0;
+      const scaledGlow = glowStrength > 0 ? Math.max(2, Math.round(glowStrength * ratio)) : 0;
+      const scaledShadow = Math.max(1, Math.round(shadowDepth * ratio));
+
+      let textShadowParts = [];
+      
+      // 4-direction hard outline (only if size > 0)
+      if (outlineWidth > 0) {
+         // Create outline using multiple shadows to ensure thickness
+         // For a thick outline, we might need more passes or offsets.
+         // Current simple implementation: 4 corners.
+         // If scaledOutline is large (e.g. >2), 4 corners might leave gaps.
+         // But for now let's stick to 4 corners.
+         const o = scaledOutline;
+         if (o > 0) {
+             textShadowParts.push(
+               `${o}px ${o}px 0 ${outlineColor}`,
+               `-${o}px -${o}px 0 ${outlineColor}`,
+               `${o}px -${o}px 0 ${outlineColor}`,
+               `-${o}px ${o}px 0 ${outlineColor}`,
+               // Add cardinal points for better coverage if > 1px
+               // This helps avoid gaps in corners if outline is thick
+               `${o}px 0 0 ${outlineColor}`,
+               `-${o}px 0 0 ${outlineColor}`,
+               `0 ${o}px 0 ${outlineColor}`,
+               `0 -${o}px 0 ${outlineColor}`
+             );
+         }
       }
+
+      // Drop shadow - ensure it's distinct
+      if (shadowDepth > 0) {
+        textShadowParts.push(`${scaledShadow}px ${scaledShadow}px ${Math.max(scaledShadow, 2)}px ${shadowColor}`);
+      }
+
+      // Glow - ensure it's strong enough and layered correctly
+      if (glowStrength > 0) {
+        // Double up layer for intensity
+        textShadowParts.push(
+            `0 0 ${scaledGlow}px ${glowColor}`, 
+            `0 0 ${scaledGlow * 2}px ${glowColor}`,
+            `0 0 ${scaledGlow * 3}px ${glowColor}`
+        );
+      }
+
+      const textShadow = textShadowParts.join(', ');
 
       // Find active group
       let activeGroup = null;
@@ -60,6 +111,7 @@ export default {
 
       if (!activeGroup) {
         preview.innerHTML = '';
+        lastGroupKey = null;
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
         return;
       }
@@ -79,12 +131,24 @@ export default {
       preview.style.fontFamily = fontFamily + ', Impact, sans-serif';
       preview.style.letterSpacing = (s.letterSpacing || 0) + 'px';
       preview.style.wordSpacing = (s.wordGap || 0) * 4 + 'px';
-      preview.style.textShadow = textShadow;
+      preview.style.fontWeight = bold ? 'bold' : 'normal';
+      // We apply textShadow and fontStyle directly to spans below to ensure they work
+      // preview.style.textShadow = textShadow; 
+
+      const fontStyle = italic ? 'italic' : 'normal';
+      const fontWeight = bold ? 'bold' : 'normal';
 
       // Static mode
       if (!store.useDynamicMode) {
-        const sentence = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text).join(' ');
-        preview.innerHTML = '<span class="subtitle-word" style="color:' + textColor + ';">' + sentence + '</span>';
+        const groupKey = activeGroup.start + '_' + activeGroup.end;
+        if (groupKey !== lastGroupKey) {
+          lastGroupKey = groupKey;
+          const sentence = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text).join(' ');
+          const animName = store.style.sentenceAnimation || 'none';
+          const animSpeed = (store.style.staticAnimSpeed || 300) + 'ms';
+          const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
+          preview.innerHTML = `<span class="subtitle-word${animClass}" style="color:${textColor}; --anim-speed:${animSpeed}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}">${sentence}</span>`;
+        }
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
         return;
       }
@@ -99,7 +163,7 @@ export default {
           : (ws.normal_color ? '#' + ws.normal_color : textColor);
         const scaleVal = isActive ? 'scale(' + scale + ')' : 'scale(1)';
         const fs = ws.font_size ? 'font-size:' + Math.round(ws.font_size * displayedHeight / actualHeight) + 'px;' : '';
-        return '<span class="subtitle-word" style="color:' + color + '; transform:' + scaleVal + '; ' + fs + '">' + text + '</span>';
+        return '<span class="subtitle-word" style="color:' + color + '; transform:' + scaleVal + '; ' + fs + '; font-style:' + fontStyle + '; font-weight:' + fontWeight + '; text-shadow:' + textShadow + '">' + text + '</span>';
       }).join(' ');
 
       // Highlight playing word in transcript
@@ -129,6 +193,9 @@ export default {
         videoEl.value.load();
       }
     });
+
+    // Reset group key so the first group re-animates after a mode switch
+    watch(() => store.useDynamicMode, () => { lastGroupKey = null; });
 
     onMounted(() => {
       if (videoEl.value) {

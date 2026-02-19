@@ -117,8 +117,10 @@ class StyleConfig(BaseModel):
     # Animation
     animation: str = "color-only"  # none, scale, color-only, bounce
     group_animation: str = "none"  # none, fade-in, slide-up, slide-down, pop-in, typewriter
-    anim_speed: int = 200  # Animation duration in ms
-    
+    anim_speed: int = 200  # Animation duration in ms (dynamic mode)
+    sentence_animation: str = "fade-in"  # static mode entrance animation
+    static_anim_speed: int = 300  # Animation duration in ms (static mode)
+
     # Text transform
     uppercase: bool = True
 
@@ -276,6 +278,8 @@ def _do_render(render_id: str, req: RenderRequest):
             animation=req.style.animation,
             group_animation=req.style.group_animation,
             anim_speed=req.style.anim_speed,
+            sentence_animation=req.style.sentence_animation,
+            static_anim_speed=req.style.static_anim_speed,
             uppercase=req.style.uppercase,
         )
 

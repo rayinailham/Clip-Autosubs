@@ -34,7 +34,7 @@
   position: relative;
   display: inline-block;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   line-height: 0;
 }
 .subtitle-container video {
@@ -61,13 +61,24 @@
   line-height: normal;
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  overflow: visible;
   white-space: normal;
   word-break: break-word;
   text-align: center;
   padding: 0 4%;
   box-sizing: border-box;
 }
+
+/* Entrance animations for static subtitle mode */
+@keyframes subtitleFadeIn  { from { opacity: 0; }             to { opacity: 1; } }
+@keyframes subtitleSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes subtitleSlideDown { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes subtitlePopIn   { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+
+.subtitle-anim-fade-in   { animation: subtitleFadeIn   var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-up  { animation: subtitleSlideUp  var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-down{ animation: subtitleSlideDown var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-pop-in    { animation: subtitlePopIn    var(--anim-speed, 300ms) cubic-bezier(0.34,1.56,0.64,1) both; }
 .subtitle-overlay.pos-bottom { align-items: flex-end; }
 .subtitle-overlay.pos-center { align-items: center; }
 .subtitle-overlay.pos-top    { align-items: flex-start; }
@@ -76,7 +87,7 @@
   display: inline-block;
   margin: 0 0.1em;
   color: #fff;
-  text-shadow: 3px 3px 6px rgba(0,0,0,0.9), -1px -1px 3px rgba(0,0,0,0.9);
+  /* text-shadow is set dynamically by VideoPanel.js — do NOT hardcode here */
   transition: all 0.08s ease-out;
 }
 .subtitle-word.highlight {

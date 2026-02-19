@@ -299,7 +299,14 @@ export default {
           <option value="fade-in">Fade In</option>
           <option value="slide-up">Slide Up</option>
           <option value="slide-down">Slide Down</option>
+          <option value="slide-left">Slide Left</option>
+          <option value="slide-right">Slide Right</option>
           <option value="pop-in">Pop In</option>
+          <option value="bounce">Bounce / Drop</option>
+          <option value="blur-in">Blur In</option>
+          <option value="stretch">Stretch</option>
+          <option value="zoom-drop">Zoom Drop</option>
+          <option value="flip-in">Flip In</option>
           <option value="typewriter">Typewriter</option>
         </select>
       </div>
@@ -320,8 +327,16 @@ export default {
           <option value="fade-in">Fade In</option>
           <option value="slide-up">Slide Up</option>
           <option value="slide-down">Slide Down</option>
+          <option value="slide-left">Slide Left</option>
+          <option value="slide-right">Slide Right</option>
           <option value="pop-in">Pop In</option>
+          <option value="bounce">Bounce / Drop</option>
+          <option value="blur-in">Blur In</option>
+          <option value="stretch">Stretch</option>
+          <option value="zoom-drop">Zoom Drop</option>
+          <option value="flip-in">Flip In</option>
           <option value="typewriter">Typewriter</option>
+          <option value="cascade">Cascade Pop</option>
         </select>
       </div>
       <div class="style-row">

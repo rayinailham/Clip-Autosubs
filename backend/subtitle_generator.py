@@ -203,6 +203,8 @@ def generate_ass(
     animation: str = "color-only",
     group_animation: str = "none",
     anim_speed: int = 200,
+    sentence_animation: str = "fade-in",
+    static_anim_speed: int = 200,
     uppercase: bool = True,
 ) -> str:
     """
@@ -257,41 +259,198 @@ def generate_ass(
 
     # ========== STATIC MODE: Simple sentence subtitles ==========
     if not dynamic_mode:
+        # Pre-compute anchor position for movement-based animations
+        cx_s = video_width // 2
+        if position == "bottom":
+            cy_s = video_height - margin_v
+        elif position == "top":
+            cy_s = margin_v
+        else:
+            cy_s = video_height // 2
+
         for group in groups:
             group_words_list = group["words"]
             group_start = group["start"]
             group_end = group["end"]
 
-            # Combine all words into one subtitle line
             sentence = " ".join(
                 w["text"].upper() if uppercase else w["text"]
                 for w in group_words_list
             )
 
             start_str = format_ass_time(group_start)
-            end_str = format_ass_time(group_end)
+            end_str   = format_ass_time(group_end)
+            speed = static_anim_speed
 
-            # Build simple tags - use normal_color for static mode
-            normal_ass = rgb_to_ass_color(normal_color)
-            tags = [f"\\c{normal_ass}"]
+            # Base color and glow tags (shared)
+            normal_ass_s = rgb_to_ass_color(normal_color)
 
-            # Add glow effect if enabled
-            if glow_strength > 0:
-                glow_color_ass = rgb_to_ass_color(glow_color)
-                tags.append(f"\\blur{glow_strength // 2}")
-                tags.append(f"\\4c{glow_color_ass}")
+            def base_color_glow():
+                t = [f"\\c{normal_ass_s}"]
+                if glow_strength > 0:
+                    t.append(f"\\blur{glow_strength // 2}")
+                    t.append(f"\\4c{rgb_to_ass_color(glow_color)}")
+                return t
 
-            # Add group animation
-            if group_animation == "fade-in":
-                tags.append(f"\\fad({anim_speed},0)")
-            elif group_animation == "pop-in":
-                tags.append(f"\\fscx0\\fscy0\\t(0,{anim_speed},\\fscx100\\fscy100)")
+            # ---- typewriter: word-by-word positioned reveal ----
+            if sentence_animation == "typewriter":
+                words_text_list = [
+                    w["text"].upper() if uppercase else w["text"]
+                    for w in group_words_list
+                ]
+                word_pos = calculate_word_positions(
+                    words_text=words_text_list,
+                    font_size=font_size,
+                    video_width=video_width,
+                    video_height=video_height,
+                    margin_h=margin_h,
+                    margin_v=margin_v,
+                    position=position,
+                    word_gap=word_gap,
+                )
+                total_words = max(len(words_text_list), 1)
+                word_interval = min(speed / total_words / 1000.0, 0.1)
+                for widx, word_text in enumerate(words_text_list):
+                    wcx, wcy = word_pos.get(widx, (cx_s, cy_s))
+                    word_appear = group_start + widx * word_interval
+                    if word_appear >= group_end:
+                        word_appear = group_start
+                    w_tags = [f"\\q2\\an5\\pos({wcx},{wcy})\\c{normal_ass_s}"]
+                    if glow_strength > 0:
+                        w_tags.append(f"\\blur{glow_strength // 2}")
+                        w_tags.append(f"\\4c{rgb_to_ass_color(glow_color)}")
+                    w_tags.append("\\fad(40,0)")
+                    w_tags_str = "".join(w_tags)
+                    events.append(
+                        f"Dialogue: 0,{format_ass_time(word_appear)},{end_str},Default,,0,0,0,,"
+                        f"{{{w_tags_str}}}{word_text}"
+                    )
 
-            tag_str = "".join(tags)
-            events.append(
-                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
-                f"{{{tag_str}}}{sentence}"
-            )
+            else:
+                tags = base_color_glow()
+
+                if sentence_animation == "none":
+                    pass
+
+                elif sentence_animation == "fade-in":
+                    tags.append(f"\\fad({speed},0)")
+
+                elif sentence_animation == "pop-in":
+                    tags.append(f"\\fscx0\\fscy0\\t(0,{speed},\\fscx100\\fscy100)")
+
+                elif sentence_animation == "slide-up":
+                    offset = font_size
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s},{cy_s + offset},{cx_s},{cy_s},0,{speed})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+
+                elif sentence_animation == "slide-down":
+                    offset = font_size
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s},{cy_s - offset},{cx_s},{cy_s},0,{speed})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+
+                elif sentence_animation == "slide-left":
+                    offset = video_width // 3
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s - offset},{cy_s},{cx_s},{cy_s},0,{speed})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+
+                elif sentence_animation == "slide-right":
+                    offset = video_width // 3
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s + offset},{cy_s},{cx_s},{cy_s},0,{speed})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+
+                elif sentence_animation == "bounce":
+                    # Drop from above then return to position (two-phase move via sequential events)
+                    overshoot = font_size // 3
+                    mid_t = int(speed * 0.65)
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s},{cy_s - font_size * 2},{cx_s},{cy_s + overshoot},0,{mid_t})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+                    tags.append(f"\\fad({speed // 4},0)")
+                    # First event: overshoot
+                    tag_str = "".join(tags)
+                    events.append(
+                        f"Dialogue: 0,{start_str},{format_ass_time(group_start + mid_t / 1000.0)},Default,,0,0,0,,"
+                        f"{{{tag_str}}}{sentence}"
+                    )
+                    # Second event: settle
+                    settle_tags = [
+                        f"\\q2\\an5\\move({cx_s},{cy_s + overshoot},{cx_s},{cy_s},0,{speed - mid_t})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+                    settle_str = "".join(settle_tags)
+                    events.append(
+                        f"Dialogue: 0,{format_ass_time(group_start + mid_t / 1000.0)},{end_str},Default,,0,0,0,,"
+                        f"{{{settle_str}}}{sentence}"
+                    )
+                    continue  # skip normal append below
+
+                elif sentence_animation == "blur-in":
+                    tags.append(f"\\blur20\\t(0,{speed},\\blur0)")
+
+                elif sentence_animation == "stretch":
+                    tags.append(f"\\fscx0\\fscy100\\t(0,{speed},\\fscx100\\fscy100)")
+
+                elif sentence_animation == "zoom-drop":
+                    offset = font_size // 2
+                    tags = [
+                        f"\\q2\\an5\\move({cx_s},{cy_s - offset},{cx_s},{cy_s},0,{speed})"
+                        f"\\c{normal_ass_s}"
+                    ] + base_color_glow()[1:]
+                    tags.append(f"\\fscx130\\fscy130\\t(0,{speed},\\fscx100\\fscy100)")
+                    tags.append(f"\\fad({speed // 2},0)")
+
+                elif sentence_animation == "flip-in":
+                    # Horizontal flip (flip around vertical axis = scale X from 0)
+                    tags.append(f"\\fscx0\\t(0,{speed},\\fscx100)")
+                    tags.append(f"\\fad({speed // 3},0)")
+
+                elif sentence_animation == "cascade":
+                    # Staggered pop-in per word (similar to typewriter but all pop in)
+                    words_text_list = [
+                        w["text"].upper() if uppercase else w["text"]
+                        for w in group_words_list
+                    ]
+                    word_pos = calculate_word_positions(
+                        words_text=words_text_list,
+                        font_size=font_size,
+                        video_width=video_width,
+                        video_height=video_height,
+                        margin_h=margin_h,
+                        margin_v=margin_v,
+                        position=position,
+                        word_gap=word_gap,
+                    )
+                    total_words = max(len(words_text_list), 1)
+                    stagger = speed / total_words / 1000.0
+                    for widx, word_text in enumerate(words_text_list):
+                        wcx, wcy = word_pos.get(widx, (cx_s, cy_s))
+                        delay = int(widx * stagger * 1000)
+                        w_tags = [f"\\q2\\an5\\pos({wcx},{wcy})\\c{normal_ass_s}"]
+                        if glow_strength > 0:
+                            w_tags.append(f"\\blur{glow_strength // 2}")
+                            w_tags.append(f"\\4c{rgb_to_ass_color(glow_color)}")
+                        pop_dur = max(80, speed // 3)
+                        w_tags.append(f"\\fscx0\\fscy0\\t({delay},{delay + pop_dur},\\fscx100\\fscy100)")
+                        events.append(
+                            f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
+                            f"{{{''.join(w_tags)}}}{word_text}"
+                        )
+                    continue
+
+                tag_str = "".join(tags)
+                events.append(
+                    f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
+                    f"{{{tag_str}}}{sentence}"
+                )
 
         return header + "\n".join(events) + "\n"
 
@@ -332,11 +491,31 @@ def generate_ass(
             elif group_animation == "slide-down":
                 offset = font_size // 2
                 return f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
+            elif group_animation == "slide-left":
+                offset = video_width // 3
+                return f"\\move({cx - offset},{cy},{cx},{cy},0,{group_anim_duration})"
+            elif group_animation == "slide-right":
+                offset = video_width // 3
+                return f"\\move({cx + offset},{cy},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "pop-in":
                 return f"\\fscx0\\fscy0\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+            elif group_animation == "bounce":
+                offset = font_size
+                return f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
+            elif group_animation == "blur-in":
+                return f"\\blur20\\t(0,{group_anim_duration},\\blur0)"
+            elif group_animation == "stretch":
+                return f"\\fscx0\\fscy100\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+            elif group_animation == "zoom-drop":
+                offset = font_size // 2
+                return (f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
+                        f"\\fscx130\\fscy130\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+                        f"\\fad({group_anim_duration // 2},0)")
+            elif group_animation == "flip-in":
+                return f"\\fscx0\\t(0,{group_anim_duration},\\fscx100)\\fad({group_anim_duration // 3},0)"
             elif group_animation == "typewriter":
-                # For typewriter, we don't animate the group but per-word reveal
-                return f"\\fad({50},0)"
+                # Per-word reveal handled below; small fade for when word appears
+                return f"\\fad(50,0)"
             return ""
 
         # --- For each highlight state (one per word), emit one Dialogue per word ---
@@ -359,6 +538,10 @@ def generate_ass(
 
             # Emit one Dialogue event per word in the group (all visible at the same time)
             for j, w in enumerate(group_words_list):
+                # Typewriter: only words up to current active word are visible
+                if group_animation == "typewriter" and j > i:
+                    continue
+
                 text = w["text"].upper() if uppercase else w["text"]
                 is_active = (j == i)
 
@@ -384,7 +567,9 @@ def generate_ass(
 
                 # Build base tags
                 # For group animations that use \move, we skip the \pos tag
-                if group_animation in ("slide-up", "slide-down") and i == 0:
+                _move_anims = ("slide-up", "slide-down", "slide-left", "slide-right",
+                               "bounce", "zoom-drop")
+                if group_animation in _move_anims and i == 0:
                     # Use \move for the first highlight window only
                     group_anim_tag = get_group_anim_tags(group_animation, cx, cy, j == 0)
                     if group_anim_tag and "\\move" in group_anim_tag:
