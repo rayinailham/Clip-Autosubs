@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from renderer import check_ffmpeg, get_video_info, render_video
+from silence_cutter import cut_silence
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
 
@@ -49,6 +50,9 @@ MAX_FILE_SIZE_MB = 500
 
 # ─── In-memory render job tracker ────────────────────────────
 render_jobs: dict = {}
+
+# ─── In-memory cut-silence job tracker ───────────────────────
+cut_silence_jobs: dict = {}
 
 
 # ─── Pydantic Models ────────────────────────────────────────
@@ -127,6 +131,13 @@ class StyleConfig(BaseModel):
 
 class TranscribeExistingRequest(BaseModel):
     filename: str
+
+
+class CutSilenceRequest(BaseModel):
+    video_filename: str
+    words: list[WordItem]                # word-level timestamps from transcription
+    min_silence_ms: int = 500           # gaps >= this (ms) are removed
+    padding_ms: int = 100               # context kept around each speech block (ms)
 
 
 class SaveStyleRequest(BaseModel):
@@ -435,6 +446,70 @@ async def list_outputs():
                 "url": f"/outputs/{f.name}",
             })
     return {"files": files}
+
+
+# ─── Cut Silence ────────────────────────────────────────────
+
+def _do_cut_silence(job_id: str, req: CutSilenceRequest):
+    """Background task: detect silence from word timestamps and cut it out."""
+    logs: list[str] = []
+
+    def progress(msg: str):
+        logs.append(msg)
+        cut_silence_jobs[job_id]["log"] = logs[-1]
+
+    try:
+        video_path = UPLOAD_DIR / req.video_filename
+        if not video_path.exists():
+            cut_silence_jobs[job_id] = {
+                "status": "error",
+                "error": f"Video file not found: {req.video_filename}",
+            }
+            return
+
+        cut_silence_jobs[job_id]["status"] = "processing"
+
+        words_dicts = [w.model_dump() for w in req.words]
+
+        output_filename = f"{video_path.stem}_silencecut_{job_id}.mp4"
+        output_path = RENDERED_DIR / output_filename
+
+        stats = cut_silence(
+            video_path=str(video_path),
+            words=words_dicts,
+            output_path=str(output_path),
+            min_silence_ms=req.min_silence_ms,
+            padding_ms=req.padding_ms,
+            progress_cb=progress,
+        )
+
+        cut_silence_jobs[job_id] = {
+            "status": "done",
+            "filename": output_filename,
+            "url": f"/rendered/{output_filename}",
+            **stats,
+        }
+
+    except Exception as e:
+        print(f"[cut_silence] Error: {e}")
+        cut_silence_jobs[job_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/cut-silence")
+async def start_cut_silence(req: CutSilenceRequest, background_tasks: BackgroundTasks):
+    """Start a background silence-cutting job. Returns a job_id for polling."""
+    job_id = uuid.uuid4().hex[:8]
+    cut_silence_jobs[job_id] = {"status": "queued", "log": "Queued…"}
+    background_tasks.add_task(_do_cut_silence, job_id, req)
+    return {"job_id": job_id}
+
+
+@app.get("/cut-silence-status/{job_id}")
+async def get_cut_silence_status(job_id: str):
+    """Poll the status of a cut-silence job."""
+    if job_id not in cut_silence_jobs:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return cut_silence_jobs[job_id]
 
 
 # ─── Static Files ──────────────────────────────────────────

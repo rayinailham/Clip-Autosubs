@@ -15,21 +15,14 @@ import warnings
 from pathlib import Path
 
 # Suppress noisy third-party warnings before importing them
-# NOTE: warnings.filterwarnings uses re.match(), so the pattern must
-# handle messages that start with \n (like the torchcodec warning).
-# (?s) enables DOTALL so that . matches newlines.
-warnings.filterwarnings("ignore", message="(?s).*torchcodec.*")
-warnings.filterwarnings("ignore", message="(?s).*TensorFloat-32.*")
+warnings.filterwarnings("ignore", message="torchcodec is not installed")
+warnings.filterwarnings("ignore", message="TensorFloat-32")
 warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", message="(?s).*Lightning automatically upgraded.*")
-
-# Silence all sub-loggers for noisy third-party packages
-for _logger_name in (
-    "whisperx", "whisperx.asr", "whisperx.vads", "whisperx.vads.pyannote",
-    "pyannote", "pyannote.audio",
-    "lightning", "lightning.pytorch", "lightning_fabric",
-):
-    logging.getLogger(_logger_name).setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message="Lightning automatically upgraded")
+logging.getLogger("whisperx").setLevel(logging.WARNING)
+logging.getLogger("pyannote").setLevel(logging.WARNING)
+logging.getLogger("lightning").setLevel(logging.WARNING)
+logging.getLogger("lightning_fabric").setLevel(logging.WARNING)
 
 import torch
 import whisperx

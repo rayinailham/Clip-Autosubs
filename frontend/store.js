@@ -78,7 +78,19 @@ const store = reactive({
   transcribing: false,
   progressText: 'Transcribing…',
   progressFile: '',
-});
+  // ── Silence cutter ────────────────────────
+  silenceCutter: {
+    minSilenceMs: 500,
+    paddingMs: 100,
+    active: false,
+    log: '',
+    status: '',   // '' | 'queued' | 'processing' | 'done' | 'error'
+    error: '',
+    jobId: '',
+    downloadUrl: '',
+    downloadLabel: '',
+    stats: null,  // stats object returned by backend when done
+  },});
 
 export default store;
 

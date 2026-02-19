@@ -382,3 +382,146 @@
   flex-shrink: 0;
 }
 .timing-nudge:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+/* ── Silence Cutter Panel ─────────────────────── */
+.silence-cutter-panel {
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  color: var(--text);
+}
+
+.sc-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.sc-icon { font-size: 1.5rem; }
+.sc-title  { font-size: 0.95rem; font-weight: 700; }
+.sc-subtitle { font-size: 0.7rem; color: var(--text-dim); }
+
+.sc-warning {
+  background: rgba(255,170,0,0.12);
+  border: 1px solid rgba(255,170,0,0.3);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.78rem;
+  color: #ffaa00;
+}
+
+.sc-section { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.sc-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.sc-value { color: var(--accent); font-weight: 600; }
+
+.sc-range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.sc-range:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.sc-range-hints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: var(--text-dim);
+  opacity: 0.6;
+}
+
+.sc-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+/* Indeterminate progress bar */
+.sc-progress { display: flex; flex-direction: column; gap: 0.4rem; }
+.sc-progress-bar {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.sc-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+}
+.sc-indeterminate {
+  width: 40%;
+  animation: sc-slide 1.4s ease-in-out infinite;
+}
+@keyframes sc-slide {
+  0%   { transform: translateX(-150%); }
+  100% { transform: translateX(350%); }
+}
+.sc-log-text { font-size: 0.72rem; color: var(--text-dim); margin: 0; }
+
+/* Spinner inside button */
+.sc-spinner {
+  width: 12px; height: 12px;
+  border: 2px solid rgba(255,255,255,0.25);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sc-spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes sc-spin { to { transform: rotate(360deg); } }
+
+/* Error */
+.sc-error {
+  background: rgba(255,60,60,0.1);
+  border: 1px solid rgba(255,60,60,0.35);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.78rem;
+  color: #ff6060;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* Done */
+.sc-done { display: flex; flex-direction: column; gap: 0.6rem; }
+.sc-done-header { font-weight: 700; font-size: 0.9rem; color: #4ecca3; }
+
+.sc-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.5rem;
+}
+.sc-stat {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface2);
+  border-radius: 5px;
+  padding: 0.35rem 0.5rem;
+}
+.sc-stat-label { font-size: 0.65rem; color: var(--text-dim); }
+.sc-stat-value { font-size: 0.85rem; font-weight: 600; }
+.sc-removed { color: #4ecca3; }
+
+.sc-download-btn { width: 100%; text-align: center; text-decoration: none; }
+
+.sc-reset-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 5px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  align-self: flex-start;
+}
+.sc-reset-btn:hover { border-color: var(--accent); color: var(--accent); }
+

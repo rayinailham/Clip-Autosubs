@@ -60,6 +60,24 @@ export async function pollRenderStatus(renderId) {
   return res.json();
 }
 
+export async function startCutSilenceJob(payload) {
+  const res = await fetch('/cut-silence', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Cut silence request failed');
+  }
+  return res.json();
+}
+
+export async function pollCutSilenceStatus(jobId) {
+  const res = await fetch('/cut-silence-status/' + jobId);
+  return res.json();
+}
+
 export function videoURL(filename) {
   return '/video/' + encodeURIComponent(filename);
 }
