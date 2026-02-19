@@ -8,6 +8,7 @@
 import { computed } from 'vue';
 import store from '../store.js';
 import { startTrimJob, pollTrimStatus } from '../api.js';
+import { saveUndoSnapshot } from '../store.js';
 
 // ── Remap words to the trimmed timeline ─────────────────────────────────────
 function remapWordsToTrim(words, inPoint, outPoint) {
@@ -133,6 +134,9 @@ export default {
               t.downloadLabel = data.filename;
               t.durationS     = data.duration_s;
               t.sizeMb        = data.size_mb;
+
+              // Save undo before remapping
+              saveUndoSnapshot('Trim video');
 
               // Remap word timestamps to the trimmed video
               const inPt = data.trim_start;

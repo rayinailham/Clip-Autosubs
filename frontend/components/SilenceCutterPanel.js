@@ -8,6 +8,7 @@
 import { computed } from 'vue';
 import store from '../store.js';
 import { startCutSilenceJob, pollCutSilenceStatus } from '../api.js';
+import { saveUndoSnapshot } from '../store.js';
 
 // ── Remap word timestamps to new silence-cut timeline ────────────────────────
 function remapTime(t, segments) {
@@ -31,6 +32,7 @@ function remapWords(words, segments) {
 }
 
 function applyToEditor(filename, segments) {
+  saveUndoSnapshot('Cut silence');
   if (segments && segments.length > 0) {
     store.words = remapWords(store.words, segments);
   }

@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import store, { saveUndoSnapshot, undoAction, regenerateAutoGroups } from '../store.js';
+import store, { saveUndoSnapshot, undoAction, redoAction, regenerateAutoGroups } from '../store.js';
 
 export default {
   name: 'TranscriptPanel',

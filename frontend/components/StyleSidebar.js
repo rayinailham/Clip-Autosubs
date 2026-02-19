@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import store, { regenerateAutoGroups } from '../store.js';
+import store, { regenerateAutoGroups, saveUndoSnapshot } from '../store.js';
 import { DYNAMIC_PRESETS } from '../presets/dynamicPresets.js';
 import { STATIC_PRESETS } from '../presets/staticPresets.js';
 import { EMOTION_PRESETS } from '../presets/emotionPresets.js';
@@ -55,6 +55,7 @@ export default {
 
     function applyDynamicPreset(key) {
       const p = DYNAMIC_PRESETS[key]; if (!p) return;
+      saveUndoSnapshot('Apply preset: ' + p.name);
       currentDynamicPreset.value = key;
       Object.assign(store.style, {
         fontFamily: p.fontFamily, fontSize: p.fontSize, bold: p.bold, italic: p.italic,
@@ -68,6 +69,7 @@ export default {
 
     function applyStaticPreset(key) {
       const p = STATIC_PRESETS[key]; if (!p) return;
+      saveUndoSnapshot('Apply preset: ' + p.name);
       currentStaticPreset.value = key;
       Object.assign(store.style, {
         fontFamily: p.fontFamily, fontSize: p.fontSize, bold: p.bold, italic: p.italic,
@@ -94,6 +96,7 @@ export default {
         return;
       }
       const baseFontSize = store.style.fontSize || 80;
+      saveUndoSnapshot('Apply emotion: ' + emotion.name);
       store.selectedWordIndices.forEach(idx => {
         if (!store.words[idx].style) store.words[idx].style = {};
         store.words[idx].style.highlight_color = emotion.highlight_color;
@@ -124,6 +127,7 @@ export default {
       const nc = wordNormal.value.replace('#', '');
       const fs = wordFontSize.value ? parseInt(wordFontSize.value) : null;
       const oc = wordOutline.value.replace('#', '');
+      saveUndoSnapshot('Apply per-word style');
       store.selectedWordIndices.forEach(idx => {
         if (!store.words[idx].style) store.words[idx].style = {};
         store.words[idx].style.highlight_color = hc;
@@ -134,6 +138,7 @@ export default {
     }
 
     function clearWordStyles() {
+      saveUndoSnapshot('Clear word styles');
       store.selectedWordIndices.forEach(idx => { delete store.words[idx].style; });
     }
 

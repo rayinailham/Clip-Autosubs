@@ -1,5 +1,5 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import store, { getActiveGroups, saveUndoSnapshot, regenerateAutoGroups } from '../store.js';
+import store, { getActiveGroups, saveUndoSnapshot, regenerateAutoGroups, undoAction, redoAction, addSplitAtPlayhead, toggleSegment, removeSplitPoint, getSegments } from '../store.js';
 
 export default {
   name: 'Timeline',
@@ -53,6 +53,7 @@ export default {
       const v = getVideo();
       if (v) {
         currentTime.value = v.currentTime;
+        store.currentTime = v.currentTime; // share with store
         if (v.duration && !isNaN(v.duration) && v.duration !== Infinity) {
           duration.value = v.duration;
         }
@@ -355,6 +356,32 @@ export default {
     function groupColor() { return 'rgba(124, 92, 252, 0.30)'; }
     function groupBorderColor() { return 'rgba(124, 92, 252, 0.65)'; }
 
+    // ── Split / Segment helpers ────────────────────────────────────
+    const segments = computed(() => getSegments(duration.value));
+    const hasSplitPoints = computed(() => store.splitPoints.length > 0);
+    const undoCount = computed(() => store.undoStack.length);
+    const redoCount = computed(() => store.redoStack.length);
+    const undoLabel = computed(() => {
+      if (store.undoStack.length === 0) return 'Nothing to undo';
+      return 'Undo: ' + store.undoStack[store.undoStack.length - 1].label;
+    });
+    const redoLabel = computed(() => {
+      if (store.redoStack.length === 0) return 'Nothing to redo';
+      return 'Redo: ' + store.redoStack[store.redoStack.length - 1].label;
+    });
+
+    function handleCut() {
+      addSplitAtPlayhead();
+    }
+
+    function handleToggleSegment(index) {
+      toggleSegment(index);
+    }
+
+    function handleRemoveSplit(index) {
+      removeSplitPoint(index);
+    }
+
     // ── Trim markers from store ────────────────────────────
     const trimIn  = computed(() => store.trimmer.inPoint);
     const trimOut = computed(() => store.trimmer.outPoint);
@@ -381,6 +408,10 @@ export default {
       zoomLevel, zoomPct, zoomIn, zoomOut, zoomReset, zoomToFit, onWheelZoom,
       trackInnerStyle, autoScrollToPlayhead,
       trimIn, trimOut, trimRegionStyle, onTrimMarkerMouseDown, trimDrag,
+      // Split / Undo / Redo
+      segments, hasSplitPoints, handleCut, handleToggleSegment, handleRemoveSplit,
+      undoAction, redoAction, undoCount, redoCount, undoLabel, redoLabel,
+      store,
     };
   },
   template: `
@@ -395,6 +426,18 @@ export default {
           <button class="timeline-play-btn" @click="togglePlay" title="Play / Pause">
             ▶ / ⏸
           </button>
+
+          <div class="timeline-edit-controls">
+            <button class="timeline-edit-btn timeline-cut-btn" @click="handleCut" title="Cut at playhead (S)">
+              ✂ Cut
+            </button>
+            <button class="timeline-edit-btn timeline-undo-btn" @click="undoAction" :disabled="undoCount === 0" :title="undoLabel">
+              ↩ <span v-if="undoCount > 0" class="edit-count">{{ undoCount }}</span>
+            </button>
+            <button class="timeline-edit-btn timeline-redo-btn" @click="redoAction" :disabled="redoCount === 0" :title="redoLabel">
+              ↪ <span v-if="redoCount > 0" class="edit-count">{{ redoCount }}</span>
+            </button>
+          </div>
 
           <div class="timeline-zoom-controls">
             <button class="timeline-zoom-btn" @click="zoomOut" :disabled="zoomLevel <= 1" title="Zoom out (or scroll down)">−</button>
@@ -414,6 +457,30 @@ export default {
 
             <!-- Background bar -->
             <div class="timeline-bg"></div>
+
+            <!-- Segment blocks (when split points exist) -->
+            <template v-if="hasSplitPoints">
+              <div v-for="seg in segments" :key="'seg-' + seg.index"
+                   class="timeline-segment"
+                   :class="{ removed: !seg.active }"
+                   :style="{
+                     left: pct(seg.start) + '%',
+                     width: Math.max(0.2, pct(seg.end) - pct(seg.start)) + '%',
+                   }"
+                   @click.stop="handleToggleSegment(seg.index)"
+                   :title="(seg.active ? 'Click to remove' : 'Click to keep') + ' segment ' + (seg.index + 1)">
+                <span class="segment-label">{{ seg.active ? '' : '✖' }}</span>
+              </div>
+            </template>
+
+            <!-- Split point lines -->
+            <div v-for="(sp, si) in store.splitPoints" :key="'sp-' + si"
+                 class="timeline-split-line"
+                 :style="{ left: pct(sp) + '%' }"
+                 @dblclick.stop="handleRemoveSplit(si)"
+                 :title="'Split at ' + sp.toFixed(2) + 's — dbl-click to remove'">
+              <div class="split-line-head">✂</div>
+            </div>
 
             <!-- Played bar -->
             <div class="timeline-played" :style="{ width: pct(currentTime) + '%' }"></div>

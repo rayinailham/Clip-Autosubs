@@ -1,5 +1,5 @@
-import { ref } from 'vue';
-import store from '../store.js';
+import { ref, onMounted, onBeforeUnmount } from 'vue';
+import store, { undoAction, redoAction, addSplitAtPlayhead } from '../store.js';
 import VideoPanel from './VideoPanel.js';
 import LeftSidebar from './LeftSidebar.js';
 import EditorSidebar from './EditorSidebar.js';
@@ -20,6 +20,53 @@ export default {
     function handleRender() {
       if (renderOverlayRef.value) renderOverlayRef.value.startRender();
     }
+
+    // ── Global keyboard shortcuts ───────────────────
+    function onKeyDown(e) {
+      // Skip if user is typing in an input/textarea
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
+
+      // Ctrl+Z / Cmd+Z = Undo
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        undoAction();
+        return;
+      }
+      // Ctrl+Y / Cmd+Shift+Z = Redo
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        redoAction();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+        e.preventDefault();
+        redoAction();
+        return;
+      }
+      // S = Split / Cut at playhead
+      if (e.key === 's' || e.key === 'S') {
+        if (e.ctrlKey || e.metaKey) return; // Don't intercept Ctrl+S
+        e.preventDefault();
+        addSplitAtPlayhead();
+        return;
+      }
+      // Space = Play/Pause
+      if (e.key === ' ') {
+        e.preventDefault();
+        const v = document.getElementById('editor-video');
+        if (v) { if (v.paused) v.play(); else v.pause(); }
+        return;
+      }
+    }
+
+    onMounted(() => {
+      window.addEventListener('keydown', onKeyDown);
+    });
+
+    onBeforeUnmount(() => {
+      window.removeEventListener('keydown', onKeyDown);
+    });
 
     return { store, videoPanelRef, renderOverlayRef, handleSeek, handleRender };
   },

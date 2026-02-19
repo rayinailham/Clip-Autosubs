@@ -27,9 +27,17 @@ const store = reactive({
   // ── Mode ────────────────────────────────
   useDynamicMode: true,
 
-  // ── Undo ────────────────────────────────
+  // ── Undo / Redo ─────────────────────────
   undoStack: [],
+  redoStack: [],
   MAX_UNDO: 50,
+
+  // ── Playhead (shared) ───────────────────
+  currentTime: 0,
+
+  // ── Split / Segments ────────────────────
+  splitPoints: [],        // sorted timestamps where cuts were made
+  removedSegments: [],    // indices of segments to exclude
 
   // ── Style controls (bound to UI) ───────
   style: {
@@ -142,22 +150,94 @@ export default store;
 
 // ── Helper actions ─────────────────────────
 
-export function saveUndoSnapshot(label) {
-  store.undoStack.push({
+function captureState(label) {
+  return {
     label,
     words: JSON.parse(JSON.stringify(store.words)),
     groups: JSON.parse(JSON.stringify(store.customGroups)),
-  });
+    style: JSON.parse(JSON.stringify(store.style)),
+    videoFilename: store.videoFilename,
+    splitPoints: [...store.splitPoints],
+    removedSegments: [...store.removedSegments],
+    useCustomGroups: store.useCustomGroups,
+    useDynamicMode: store.useDynamicMode,
+  };
+}
+
+function restoreSnapshot(snapshot) {
+  store.words = snapshot.words;
+  store.customGroups = snapshot.groups;
+  Object.assign(store.style, snapshot.style);
+  store.videoFilename = snapshot.videoFilename;
+  store.splitPoints = snapshot.splitPoints;
+  store.removedSegments = snapshot.removedSegments;
+  store.useCustomGroups = snapshot.useCustomGroups;
+  store.useDynamicMode = snapshot.useDynamicMode;
+  store.selectedWordIndices = new Set();
+  regenerateAutoGroups();
+}
+
+export function saveUndoSnapshot(label) {
+  store.undoStack.push(captureState(label));
   if (store.undoStack.length > store.MAX_UNDO) store.undoStack.shift();
+  // New action clears redo history
+  store.redoStack = [];
 }
 
 export function undoAction() {
   if (store.undoStack.length === 0) return;
-  const snapshot = store.undoStack.pop();
-  store.words = snapshot.words;
-  store.customGroups = snapshot.groups;
-  store.selectedWordIndices = new Set();
-  regenerateAutoGroups();
+  // Push current state to redo stack
+  store.redoStack.push(captureState('Redo'));
+  restoreSnapshot(store.undoStack.pop());
+}
+
+export function redoAction() {
+  if (store.redoStack.length === 0) return;
+  // Push current state to undo stack (without clearing redo)
+  store.undoStack.push(captureState('Undo'));
+  restoreSnapshot(store.redoStack.pop());
+}
+
+// ── Split / Segments ───────────────────────
+
+export function addSplitAtPlayhead() {
+  const t = parseFloat(store.currentTime.toFixed(3));
+  if (t <= 0) return;
+  // Don't add duplicate (within 0.05s tolerance)
+  if (store.splitPoints.some(p => Math.abs(p - t) < 0.05)) return;
+  saveUndoSnapshot('Split at ' + t.toFixed(2) + 's');
+  store.splitPoints.push(t);
+  store.splitPoints.sort((a, b) => a - b);
+}
+
+export function removeSplitPoint(index) {
+  saveUndoSnapshot('Remove split point');
+  store.splitPoints.splice(index, 1);
+  store.removedSegments = []; // Reset removed segments since indices shift
+}
+
+export function toggleSegment(segmentIndex) {
+  const idx = store.removedSegments.indexOf(segmentIndex);
+  if (idx >= 0) {
+    store.removedSegments.splice(idx, 1);
+  } else {
+    store.removedSegments.push(segmentIndex);
+  }
+}
+
+export function getSegments(duration) {
+  if (!duration) return [];
+  const points = [0, ...store.splitPoints.filter(p => p < duration), duration];
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    segments.push({
+      start: points[i],
+      end: points[i + 1],
+      active: !store.removedSegments.includes(i),
+      index: i,
+    });
+  }
+  return segments;
 }
 
 export function regenerateAutoGroups() {
