@@ -56,17 +56,23 @@ export default {
     }
 
     // ── CSS transform helper ────────────────────────────────
-    // Each section uses object-fit:cover + scale/translate for live preview.
-    // translate percentages are relative to the element size (post-scale in CSS)
-    // so we divide by zoom to get a stable pan feel.
+    // Pan is implemented by shifting the transform-origin (the zoom focal point)
+    // rather than translating the element. This ensures the video never leaves
+    // its container bounds, so no black bars are ever visible.
+    //
+    // At scale(z), the maximum safe origin offset from 50% is:
+    //   maxOff = 50 * (1 - 1/z)   (beyond this you'd see outside the source)
+    // We map panX/panY (−100…+100) linearly into [−maxOff … +maxOff].
     function sectionStyle(section) {
       const { zoom, panX, panY } = store.reframe[section];
-      // translate is in % of the element's OWN dimensions
-      const tx = panX / zoom;
-      const ty = panY / zoom;
+      const z = Math.max(1, zoom);
+      // max origin shift (%) that won't expose black at this zoom level
+      const maxOff = 50 * (1 - 1 / z);
+      const ox = 50 + (panX / 100) * maxOff;
+      const oy = 50 + (panY / 100) * maxOff;
       return {
-        transform: `scale(${zoom}) translate(${tx}%, ${ty}%)`,
-        transformOrigin: 'center center',
+        transform: `scale(${z})`,
+        transformOrigin: `${ox}% ${oy}%`,
         objectFit: 'cover',
         width: '100%',
         height: '100%',

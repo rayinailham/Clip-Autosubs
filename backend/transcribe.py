@@ -97,10 +97,10 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
     )
     print(f"[transcribe] VRAM after model load: {get_vram_usage()}")
 
-    print("[transcribe] Transcribing...")
-    result = model.transcribe(audio, batch_size=BATCH_SIZE)
-    detected_language = result.get("language", "en")
-    print(f"[transcribe] Detected language: {detected_language}")
+    print("[transcribe] Transcribing (task=translate → forced English output)...")
+    result = model.transcribe(audio, batch_size=BATCH_SIZE, task="translate")
+    detected_language = result.get("language", "en")  # original source language
+    print(f"[transcribe] Detected source language: {detected_language} → translating to English")
     print(f"[transcribe] Segments (pre-align): {len(result['segments'])}")
 
     # Free transcription model before loading alignment model
@@ -109,9 +109,11 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
     print(f"[transcribe] VRAM after model flush: {get_vram_usage()}")
 
     # ── Step 3: Align (word-level timestamps) ───────────────
-    print("[transcribe] Loading alignment model...")
+    # Always align against English since translation output is always English.
+    # Using source language here would misalign phonemes with translated text.
+    print("[transcribe] Loading alignment model (en)...")
     model_a, metadata = whisperx.load_align_model(
-        language_code=detected_language,
+        language_code="en",
         device=DEVICE,
     )
     print(f"[transcribe] VRAM after align model load: {get_vram_usage()}")
@@ -149,7 +151,8 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
     output = {
         "metadata": {
             "source_file": video_path.name,
-            "language": detected_language,
+            "source_language": detected_language,
+            "language": "en",  # output is always English (translated)
             "model": MODEL_SIZE,
             "compute_type": COMPUTE_TYPE,
             "device": DEVICE,
