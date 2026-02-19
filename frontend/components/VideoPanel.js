@@ -102,11 +102,17 @@ export default {
 
       // Margin
       const marginVASS = s.marginV || 60;
+      const marginHASS = s.marginH || 10;
       const scaledMarginV = Math.round(marginVASS * displayedHeight / actualHeight);
+      const actualWidth = ve.videoWidth || store.metadata.width || 1920;
+      const displayedWidth = ve.clientWidth || ve.offsetWidth || 1;
+      const scaledMarginH = Math.round(marginHASS * displayedWidth / actualWidth);
 
       // Reset padding
       preview.style.paddingBottom = '';
       preview.style.paddingTop = '';
+      preview.style.paddingLeft = scaledMarginH + 'px';
+      preview.style.paddingRight = scaledMarginH + 'px';
       if (s.position === 'bottom') preview.style.paddingBottom = scaledMarginV + 'px';
       else if (s.position === 'top') preview.style.paddingTop = scaledMarginV + 'px';
 

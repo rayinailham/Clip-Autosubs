@@ -180,3 +180,22 @@ export async function pollTrimStatus(jobId) {
   return res.json();
 }
 
+// ── Refine Automation ──────────────────────────────────────
+
+export async function startRefineJob(payload) {
+  const res = await fetch('/refine', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Refine request failed');
+  }
+  return res.json();
+}
+
+export async function pollRefineStatus(jobId) {
+  const res = await fetch('/refine-status/' + jobId);
+  return res.json();
+}

@@ -34,6 +34,7 @@ from silence_cutter import cut_silence
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
+from refine import refine_video
 
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -70,6 +71,9 @@ yt_cut_jobs: dict = {}
 
 # ─── In-memory Trim job tracker ──────────────────────────────
 trim_jobs: dict = {}
+
+# ─── In-memory Refine job tracker ────────────────────────────
+refine_jobs: dict = {}
 
 
 # ─── Pydantic Models ────────────────────────────────────────
@@ -194,6 +198,13 @@ class TrimRequest(BaseModel):
     video_filename: str
     trim_start: float        # seconds
     trim_end: float          # seconds
+
+
+class RefineRequest(BaseModel):
+    video_filename: str
+    gemini_api_key: str
+    min_silence_ms: int = 500
+    padding_ms: int = 100
 
 
 class YtAnalyzeRequest(BaseModel):
@@ -949,6 +960,69 @@ async def yt_clip_cut_status(job_id: str):
     if job_id not in yt_cut_jobs:
         raise HTTPException(status_code=404, detail="Cut job not found")
     return yt_cut_jobs[job_id]
+
+
+# ─── Refine ─────────────────────────────────────────────────
+
+def _do_refine(job_id: str, req: RefineRequest):
+    """Background task: run full refine pipeline."""
+    def progress(step: str, msg: str):
+        refine_jobs[job_id]["step"] = step
+        refine_jobs[job_id]["message"] = msg
+
+    try:
+        video_path = UPLOAD_DIR / req.video_filename
+        if not video_path.exists():
+            refine_jobs[job_id] = {
+                "status": "error",
+                "error": f"Video file not found: {req.video_filename}",
+            }
+            return
+
+        refine_jobs[job_id]["status"] = "processing"
+
+        result = refine_video(
+            video_path=str(video_path),
+            output_dir=str(OUTPUT_DIR),
+            rendered_dir=str(RENDERED_DIR),
+            gemini_api_key=req.gemini_api_key,
+            min_silence_ms=req.min_silence_ms,
+            padding_ms=req.padding_ms,
+            progress_cb=progress,
+        )
+
+        refine_jobs[job_id] = {
+            "status": "done",
+            **result,
+        }
+
+    except Exception as e:
+        print(f"[refine] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        refine_jobs[job_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/refine")
+async def start_refine(req: RefineRequest, background_tasks: BackgroundTasks):
+    """Start a background refine job. Returns job_id for polling."""
+    if not req.gemini_api_key.strip():
+        raise HTTPException(status_code=400, detail="Gemini API key is required.")
+    video_path = UPLOAD_DIR / req.video_filename
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {req.video_filename}")
+    job_id = uuid.uuid4().hex[:8]
+    refine_jobs[job_id] = {"status": "queued", "step": "init", "message": "Queued…"}
+    background_tasks.add_task(_do_refine, job_id, req)
+    return {"job_id": job_id}
+
+
+@app.get("/refine-status/{job_id}")
+async def get_refine_status(job_id: str):
+    """Poll the status of a refine job."""
+    if job_id not in refine_jobs:
+        raise HTTPException(status_code=404, detail="Refine job not found")
+    return refine_jobs[job_id]
 
 
 # ─── Static Files ──────────────────────────────────────────

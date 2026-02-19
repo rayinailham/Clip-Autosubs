@@ -1,4 +1,21 @@
 export const STATIC_PRESETS = {
+  natural: {
+    name: 'Natural',
+    fontFamily: 'Montserrat',
+    fontSize: 78,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    textColor: '#FFFFFF',
+    outlineColor: '#000000',
+    shadowColor: '#000000',
+    outline: 4,
+    shadow: 2,
+    glow: 10,
+    glowColor: '#FFFFFF',
+    sentenceAnimation: 'fade-in',
+    animSpeed: 300,
+  },
   classic: {
     name: 'Classic',
     fontFamily: 'Arial Black',

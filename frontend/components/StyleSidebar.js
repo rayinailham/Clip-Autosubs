@@ -7,13 +7,14 @@ import { EMOTION_PRESETS } from '../presets/emotionPresets.js';
 export default {
   name: 'StyleSidebar',
   setup() {
-    const currentDynamicPreset = ref('vtuber');
-    const currentStaticPreset = ref('classic');
+    const currentDynamicPreset = ref('natural');
+    const currentStaticPreset = ref('natural');
     const emotionInfo = ref('Select words, then click an emotion to apply');
     const emotionWarning = ref(false);
 
     // Dynamic preset info for template
     const dynamicIconMap = {
+      natural:   { icon: '✨', iconText: null,    iconClass: '' },
       vtuber:    { icon: '🔥', iconText: null,    iconClass: '' },
       neon:      { icon: '',   iconText: 'RAVE',  iconClass: 'neon-text' },
       anime:     { icon: '',   iconText: 'アニメ', iconClass: 'anime-text' },
@@ -31,6 +32,7 @@ export default {
     }));
 
     const staticPresetList = [
+      { key: 'natural',    icon: '✨', name: 'Natural' },
       { key: 'classic',    icon: '🎬', name: 'Classic' },
       { key: 'cinematic',  icon: '🎥', name: 'Cinematic' },
       { key: 'minimal',    icon: '—',  name: 'Minimal' },
@@ -83,8 +85,8 @@ export default {
 
     function setSubtitleMode(mode) {
       store.useDynamicMode = (mode === 'dynamic');
-      if (store.useDynamicMode) applyDynamicPreset('vtuber');
-      else applyStaticPreset('classic');
+      if (store.useDynamicMode) applyDynamicPreset('natural');
+      else applyStaticPreset('natural');
     }
 
     function applyEmotion(key) {

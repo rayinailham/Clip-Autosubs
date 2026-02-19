@@ -212,4 +212,19 @@
   display: flex;
   gap: 0.5rem;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.btn-retranscribe {
+  border-color: rgba(255, 165, 0, 0.3);
+  color: #ffa500;
+}
+.btn-retranscribe:hover:not(:disabled) {
+  border-color: #ffa500;
+  background: rgba(255, 165, 0, 0.12);
+  color: #ffb733;
+}
+.btn-retranscribe:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }

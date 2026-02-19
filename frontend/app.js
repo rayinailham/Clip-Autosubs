@@ -6,9 +6,10 @@ import UploadView from './components/UploadView.js';
 import EditorView from './components/EditorView.js';
 import ReframeView from './components/ReframeView.js';
 import YtClipperView from './components/YtClipperView.js';
+import RefineView from './components/RefineView.js';
 
 const App = {
-  components: { AppHeader, HomeView, UploadView, EditorView, ReframeView, YtClipperView },
+  components: { AppHeader, HomeView, UploadView, EditorView, ReframeView, YtClipperView, RefineView },
   setup() {
     return { store };
   },
@@ -21,6 +22,7 @@ const App = {
     </template>
     <ReframeView    v-else-if="store.appMode === 'vtuber'" />
     <YtClipperView  v-else-if="store.appMode === 'ytclipper'" />
+    <RefineView     v-else-if="store.appMode === 'refine'" />
   `,
 };
 

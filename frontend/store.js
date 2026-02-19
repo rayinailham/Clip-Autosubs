@@ -41,23 +41,23 @@ const store = reactive({
 
   // ── Style controls (bound to UI) ───────
   style: {
-    fontFamily: 'Bangers',
-    fontSize: 85,
+    fontFamily: 'Montserrat',
+    fontSize: 78,
     bold: true,
     italic: false,
     uppercase: true,
     highlight: '#FFD700',
     textColor: '#FFFFFF',
-    outlineColor: '#FF1493',
+    outlineColor: '#000000',
     shadowColor: '#000000',
-    outline: 5,
-    shadow: 3,
-    glow: 8,
-    glowColor: '#FFD700',
+    outline: 4,
+    shadow: 2,
+    glow: 10,
+    glowColor: '#FFFFFF',
     scale: 100,
     animation: 'color-only',
     groupAnimation: 'pop-in',
-    animSpeed: 200,
+    animSpeed: 300,
     sentenceAnimation: 'fade-in',
     staticAnimSpeed: 300,
     position: 'bottom',
@@ -144,9 +144,46 @@ const store = reactive({
   yt: {
     prefillFile: '', // filename to auto-load in upload view after clipping
   },
+
+  // ── Refine Automation ─────────────────────
+  refine: {
+    geminiApiKey: '',
+    status: '',        // '' | 'queued' | 'processing' | 'done' | 'error'
+    step: '',          // 'init' | 'transcribe' | 'silence' | 'analyze' | 'apply' | 'done'
+    message: '',
+    jobId: '',
+    error: '',
+    result: null,      // full result from backend when done
+  },
+
+  // ── Speaker data ──────────────────────────
+  speakers: {},          // e.g. { SPEAKER_1: 'Host', SPEAKER_2: 'Guest' }
+  hiddenWordIndices: [], // word indices to hide (overlapping speech)
+  hook: null,            // { word_index_start, word_index_end, reason }
 });
 
 export default store;
+
+// ── Speaker color palette ───────────────────
+
+export const SPEAKER_COLORS = {
+  SPEAKER_1: { bg: 'rgba(124, 92, 252, 0.30)', border: 'rgba(124, 92, 252, 0.65)', text: '#7C5CFC', label: '#b4a0ff' },
+  SPEAKER_2: { bg: 'rgba(76, 175, 80, 0.30)',  border: 'rgba(76, 175, 80, 0.65)',  text: '#4CAF50', label: '#81C784' },
+  SPEAKER_3: { bg: 'rgba(255, 152, 0, 0.30)',  border: 'rgba(255, 152, 0, 0.65)',  text: '#FF9800', label: '#FFB74D' },
+  SPEAKER_4: { bg: 'rgba(233, 30, 99, 0.30)',  border: 'rgba(233, 30, 99, 0.65)',  text: '#E91E63', label: '#F06292' },
+};
+
+export function getSpeakerColor(speaker) {
+  return SPEAKER_COLORS[speaker] || SPEAKER_COLORS.SPEAKER_1;
+}
+
+export function getUniqueSpeakers() {
+  const speakerSet = new Set();
+  for (const w of store.words) {
+    if (w.speaker) speakerSet.add(w.speaker);
+  }
+  return [...speakerSet].sort();
+}
 
 // ── Helper actions ─────────────────────────
 
@@ -257,9 +294,10 @@ export function regenerateAutoGroups() {
 export function getActiveGroups() {
   if (store.useCustomGroups) {
     return store.customGroups.map(g => ({
-      words: g.word_indices.map(i => store.words[i]),
+      words: g.word_indices.map(i => store.words[i]).filter(Boolean),
       start: g.start,
       end: g.end,
+      speaker: g.speaker || (store.words[g.word_indices[0]] || {}).speaker || null,
     }));
   }
   const wpg = store.style.wpg || 4;
@@ -271,6 +309,7 @@ export function getActiveGroups() {
       words: chunk,
       start: chunk[0].start,
       end: chunk[chunk.length - 1].end,
+      speaker: chunk[0].speaker || null,
     });
   }
   return groups;

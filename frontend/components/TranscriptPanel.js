@@ -1,5 +1,6 @@
 import { ref, computed } from 'vue';
-import store, { saveUndoSnapshot, undoAction, redoAction, regenerateAutoGroups } from '../store.js';
+import store, { saveUndoSnapshot, undoAction, redoAction, regenerateAutoGroups, getSpeakerColor, getUniqueSpeakers } from '../store.js';
+import { transcribeExistingFile } from '../api.js';
 
 export default {
   name: 'TranscriptPanel',
@@ -8,6 +9,7 @@ export default {
     const showMergeModal = ref(false);
     const mergeText = ref('');
     const mergeContext = ref(null);
+    const reTranscribing = ref(false);
 
     const wordCount = computed(() => store.words.length);
     const undoCount = computed(() => store.undoStack.length);
@@ -125,16 +127,66 @@ export default {
       store.selectedWordIndices = new Set();
     }
 
+    async function reTranscribe() {
+      if (!store.videoFilename) return;
+      if (!confirm('Re-transcribe "' + store.videoFilename + '"?\\nThis will replace all current words and edits.')) return;
+      reTranscribing.value = true;
+      try {
+        const result = await transcribeExistingFile(store.videoFilename);
+        store.words = result.words || [];
+        store.metadata = result.metadata || {};
+        store.customGroups = [];
+        store.selectedWordIndices = new Set();
+        store.useCustomGroups = false;
+        store.undoStack = [];
+        store.redoStack = [];
+        regenerateAutoGroups();
+      } catch (err) {
+        alert('Re-transcription failed: ' + err.message);
+      }
+      reTranscribing.value = false;
+    }
+
     function isSelected(i) { return store.selectedWordIndices.has(i); }
     function hasStyle(w) { return w.style && Object.keys(w.style).length > 0; }
+    function isHidden(i) { return store.hiddenWordIndices && store.hiddenWordIndices.includes(i); }
+
+    // Speaker support
+    const hasSpeakers = computed(() => getUniqueSpeakers().length > 1);
+
+    function isSpeakerStart(i) {
+      if (!hasSpeakers.value) return false;
+      const w = store.words[i];
+      if (!w || !w.speaker) return false;
+      if (i === 0) return true;
+      return store.words[i - 1].speaker !== w.speaker;
+    }
+
+    function speakerLabel(w) {
+      if (!w.speaker) return '';
+      return store.speakers[w.speaker] || w.speaker.replace('SPEAKER_', 'Speaker ');
+    }
+
+    function wordSpeakerStyle(w) {
+      if (!hasSpeakers.value || !w.speaker) return {};
+      const c = getSpeakerColor(w.speaker);
+      return { borderLeftColor: c.border, borderLeftWidth: '3px', borderLeftStyle: 'solid' };
+    }
+
+    function speakerBadgeStyle(w) {
+      if (!w.speaker) return {};
+      const c = getSpeakerColor(w.speaker);
+      return { background: c.label, color: '#fff' };
+    }
 
     return {
       store, wordCount, undoCount, undoDisabled, undoTitle,
       mergeEnabled, mergeTitle,
       handleWordClick, editWord, deleteWord,
       undoAction, openMergeModal, confirmMerge, closeMergeModal,
-      newTranscription, isSelected, hasStyle,
+      newTranscription, reTranscribe, reTranscribing, isSelected, hasStyle, isHidden,
       showMergeModal, mergeText, mergeContext,
+      hasSpeakers, isSpeakerStart, speakerLabel, wordSpeakerStyle, speakerBadgeStyle,
     };
   },
   template: `
@@ -153,19 +205,27 @@ export default {
         </button>
       </div>
       <div class="word-list" id="word-list">
-        <span v-for="(w, i) in store.words" :key="i"
-              class="word-chip"
-              :class="{ selected: isSelected(i), 'has-style': hasStyle(w), merged: w._merged }"
-              :data-index="i"
-              :title="w.start.toFixed(2) + 's – ' + w.end.toFixed(2) + 's'"
-              @dblclick="editWord(i)"
-              @click="handleWordClick($event, i)">
-          {{ w.text }}
-          <button class="delete-btn" @click.stop="deleteWord(i)">×</button>
-        </span>
+        <template v-for="(w, i) in store.words" :key="i">
+          <div v-if="isSpeakerStart(i)" class="speaker-divider">
+            <span class="speaker-badge" :style="speakerBadgeStyle(w)">{{ speakerLabel(w) }}</span>
+          </div>
+          <span class="word-chip"
+                :class="{ selected: isSelected(i), 'has-style': hasStyle(w), merged: w._merged, 'word-hidden': isHidden(i) }"
+                :style="wordSpeakerStyle(w)"
+                :data-index="i"
+                :title="w.start.toFixed(2) + 's – ' + w.end.toFixed(2) + 's' + (w.speaker ? ' [' + speakerLabel(w) + ']' : '') + (isHidden(i) ? ' (hidden - overlap)' : '')"
+                @dblclick="editWord(i)"
+                @click="handleWordClick($event, i)">
+            {{ w.text }}
+            <button class="delete-btn" @click.stop="deleteWord(i)">×</button>
+          </span>
+        </template>
       </div>
       <div class="transcript-footer">
         <button class="btn btn-outline btn-sm" @click="newTranscription">⬆ New File</button>
+        <button class="btn btn-outline btn-sm btn-retranscribe" @click="reTranscribe" :disabled="reTranscribing" :title="'Re-transcribe ' + store.videoFilename">
+          {{ reTranscribing ? '⏳ Transcribing…' : '🔄 Re-Transcribe' }}
+        </button>
         <span style="flex:1"></span>
         <span style="font-size:0.7rem; color:var(--text-dim);">Click to seek • Dbl-click to edit • Shift+click to select range</span>
       </div>

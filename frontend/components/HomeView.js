@@ -17,7 +17,11 @@ export default {
       store.appMode = 'ytclipper';
     }
 
-    return { goSubtitle, goVtuber, goYtClipper };
+    function goRefine() {
+      store.appMode = 'refine';
+    }
+
+    return { goSubtitle, goVtuber, goYtClipper, goRefine };
   },
   template: `
     <div class="home-view">
@@ -27,6 +31,25 @@ export default {
       </div>
 
       <div class="home-cards">
+
+        <!-- Auto-Refine card (featured) -->
+        <div class="home-card home-card--refine" @click="goRefine">
+          <div class="home-card-icon">✨</div>
+          <h2 class="home-card-title">Auto-Refine</h2>
+          <p class="home-card-desc">
+            Drop a vertical video and let AI handle everything: transcribe,
+            identify speakers, cut silences, create smart subtitles, and
+            find the best hook — all in one click.
+          </p>
+          <div class="home-card-tags">
+            <span class="tag">Speaker ID</span>
+            <span class="tag">Smart groups</span>
+            <span class="tag">Silence cut</span>
+            <span class="tag">Hook finder</span>
+            <span class="tag">Gemini AI</span>
+          </div>
+          <button class="btn btn-refine home-card-btn">Get Started →</button>
+        </div>
 
         <!-- Subtitle Clips card -->
         <div class="home-card" @click="goSubtitle">

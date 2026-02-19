@@ -1,5 +1,5 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import store, { getActiveGroups, saveUndoSnapshot, regenerateAutoGroups, undoAction, redoAction, addSplitAtPlayhead, toggleSegment, removeSplitPoint, getSegments } from '../store.js';
+import store, { getActiveGroups, getUniqueSpeakers, getSpeakerColor, saveUndoSnapshot, regenerateAutoGroups, undoAction, redoAction, addSplitAtPlayhead, toggleSegment, removeSplitPoint, getSegments } from '../store.js';
 
 export default {
   name: 'Timeline',
@@ -190,6 +190,17 @@ export default {
       if (wrapper) wrapper.scrollLeft = 0;
     }
 
+    function onZoomSlider(e) {
+      const val = parseFloat(e.target.value);
+      zoomLevel.value = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, val));
+      if (zoomLevel.value <= 1) {
+        const wrapper = getTrackWrapper();
+        if (wrapper) wrapper.scrollLeft = 0;
+      } else {
+        nextTick(autoScrollToPlayhead);
+      }
+    }
+
     const zoomPct = computed(() => Math.round(zoomLevel.value * 100));
 
     // ── Group timing drag ─────────────────────────────────────────
@@ -353,8 +364,52 @@ export default {
       return visibleDuration <= 15;
     });
 
-    function groupColor() { return 'rgba(124, 92, 252, 0.30)'; }
-    function groupBorderColor() { return 'rgba(124, 92, 252, 0.65)'; }
+    function groupColor(g) {
+      if (g && g.speaker) {
+        const c = getSpeakerColor(g.speaker);
+        return c.bg;
+      }
+      return 'rgba(124, 92, 252, 0.30)';
+    }
+    function groupBorderColor(g) {
+      if (g && g.speaker) {
+        const c = getSpeakerColor(g.speaker);
+        return c.border;
+      }
+      return 'rgba(124, 92, 252, 0.65)';
+    }
+
+    // ── Multi-speaker support ─────────────────────────────
+    const uniqueSpeakers = computed(() => getUniqueSpeakers());
+    const hasSpeakers = computed(() => uniqueSpeakers.value.length > 1);
+
+    function speakerGroups(speaker) {
+      return groups.value.filter(g => g.speaker === speaker);
+    }
+
+    function speakerLabel(speaker) {
+      return store.speakers[speaker] || speaker.replace('SPEAKER_', 'Speaker ');
+    }
+
+    function speakerLabelColor(speaker) {
+      return getSpeakerColor(speaker).label;
+    }
+
+    // Hook marker
+    const hookMarker = computed(() => {
+      if (!store.hook || !store.words.length) return null;
+      const startIdx = store.hook.word_index_start;
+      const endIdx = store.hook.word_index_end;
+      if (startIdx == null || endIdx == null) return null;
+      const startWord = store.words[startIdx];
+      const endWord = store.words[Math.min(endIdx, store.words.length - 1)];
+      if (!startWord || !endWord) return null;
+      return {
+        start: startWord.start,
+        end: endWord.end,
+        reason: store.hook.reason || 'Best hook moment',
+      };
+    });
 
     // ── Split / Segment helpers ────────────────────────────────────
     const segments = computed(() => getSegments(duration.value));
@@ -405,9 +460,12 @@ export default {
       pct, onTrackMouseDown, onGroupHandleMouseDown, onPlayheadMouseDown, togglePlay,
       formatTime, formatTimeNoMs, formatTimePrecise, fmtSec, tickMarks, showMsInTicks,
       groupColor, groupBorderColor,
-      zoomLevel, zoomPct, zoomIn, zoomOut, zoomReset, zoomToFit, onWheelZoom,
+      zoomLevel, zoomPct, zoomIn, zoomOut, zoomReset, zoomToFit, onWheelZoom, onZoomSlider,
       trackInnerStyle, autoScrollToPlayhead,
       trimIn, trimOut, trimRegionStyle, onTrimMarkerMouseDown, trimDrag,
+      // Speaker support
+      uniqueSpeakers, hasSpeakers, speakerGroups, speakerLabel, speakerLabelColor,
+      hookMarker,
       // Split / Undo / Redo
       segments, hasSplitPoints, handleCut, handleToggleSegment, handleRemoveSplit,
       undoAction, redoAction, undoCount, redoCount, undoLabel, redoLabel,
@@ -441,6 +499,10 @@ export default {
 
           <div class="timeline-zoom-controls">
             <button class="timeline-zoom-btn" @click="zoomOut" :disabled="zoomLevel <= 1" title="Zoom out (or scroll down)">−</button>
+            <input type="range" class="timeline-zoom-slider" min="1" :max="60" step="0.25"
+                   :value="zoomLevel"
+                   @input="onZoomSlider($event)"
+                   title="Drag to zoom" />
             <span class="timeline-zoom-label" @click="zoomReset" title="Click to reset zoom">{{ zoomPct }}%</span>
             <button class="timeline-zoom-btn" @click="zoomIn" :disabled="zoomLevel >= 60" title="Zoom in (or scroll up)">+</button>
             <button v-if="zoomLevel > 1" class="timeline-zoom-btn timeline-zoom-fit" @click="zoomToFit" title="Fit to view">⊟</button>
@@ -512,41 +574,79 @@ export default {
               <div class="trim-marker-label">{{ fmtSec(trimOut) }}s</div>
             </div>
 
-            <!-- Group blocks -->
-            <div v-for="(g, i) in groups" :key="i"
-                 class="timeline-group"
-                 :class="{ 'is-dragging': groupDrag && groupDrag.gi === i }"
-                 :style="{
-                   left: pct(g.start) + '%',
-                   width: Math.max(0.3, pct(g.end) - pct(g.start)) + '%',
-                   background: groupColor(i),
-                   borderColor: groupBorderColor(i),
-                 }"
-                 :title="'#' + (i+1) + ' ' + g.words.map(w => w.text).join(' ')">
-
-              <!-- Left resize handle -->
-              <div class="tg-handle tg-handle-start"
-                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'start')"
-                   title="Drag to adjust start time"></div>
-
-              <!-- Body — drag to move -->
-              <div class="tg-body"
-                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'move')">
-                <span class="timeline-group-label">
-                  {{ g.words.slice(0, 3).map(w => w.text).join(' ') }}{{ g.words.length > 3 ? '…' : '' }}
-                </span>
-              </div>
-
-              <!-- Right resize handle -->
-              <div class="tg-handle tg-handle-end"
-                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'end')"
-                   title="Drag to adjust end time"></div>
-
-              <!-- Timing tooltip while dragging -->
-              <div v-if="groupDrag && groupDrag.gi === i" class="timeline-drag-tooltip">
-                {{ fmtSec(g.start) }}s – {{ fmtSec(g.end) }}s
-              </div>
+            <!-- Hook marker -->
+            <div v-if="hookMarker"
+                 class="timeline-hook-marker"
+                 :style="{ left: pct(hookMarker.start) + '%', width: Math.max(0.3, pct(hookMarker.end) - pct(hookMarker.start)) + '%' }"
+                 :title="'🎣 Hook: ' + hookMarker.reason">
+              <span class="hook-label">🎣 HOOK</span>
             </div>
+
+            <!-- Multi-speaker layout -->
+            <template v-if="hasSpeakers">
+              <div v-for="spk in uniqueSpeakers" :key="'spk-' + spk"
+                   class="timeline-speaker-row"
+                   :style="{ borderLeftColor: speakerLabelColor(spk) }">
+                <div class="timeline-speaker-tag" :style="{ background: speakerLabelColor(spk) }">
+                  {{ speakerLabel(spk) }}
+                </div>
+                <div v-for="(g, i) in groups" :key="i"
+                     v-show="g.speaker === spk"
+                     class="timeline-group"
+                     :class="{ 'is-dragging': groupDrag && groupDrag.gi === i }"
+                     :style="{
+                       left: pct(g.start) + '%',
+                       width: Math.max(0.3, pct(g.end) - pct(g.start)) + '%',
+                       background: groupColor(g),
+                       borderColor: groupBorderColor(g),
+                     }"
+                     :title="'#' + (i+1) + ' [' + speakerLabel(spk) + '] ' + g.words.map(w => w.text).join(' ')">
+                  <div class="tg-handle tg-handle-start"
+                       @mousedown.stop="onGroupHandleMouseDown($event, i, 'start')"></div>
+                  <div class="tg-body"
+                       @mousedown.stop="onGroupHandleMouseDown($event, i, 'move')">
+                    <span class="timeline-group-label">
+                      {{ g.words.slice(0, 3).map(w => w.text).join(' ') }}{{ g.words.length > 3 ? '…' : '' }}
+                    </span>
+                  </div>
+                  <div class="tg-handle tg-handle-end"
+                       @mousedown.stop="onGroupHandleMouseDown($event, i, 'end')"></div>
+                  <div v-if="groupDrag && groupDrag.gi === i" class="timeline-drag-tooltip">
+                    {{ fmtSec(g.start) }}s – {{ fmtSec(g.end) }}s
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Single-track layout (no speakers) -->
+            <template v-else>
+              <div v-for="(g, i) in groups" :key="i"
+                   class="timeline-group"
+                   :class="{ 'is-dragging': groupDrag && groupDrag.gi === i }"
+                   :style="{
+                     left: pct(g.start) + '%',
+                     width: Math.max(0.3, pct(g.end) - pct(g.start)) + '%',
+                     background: groupColor(g),
+                     borderColor: groupBorderColor(g),
+                   }"
+                   :title="'#' + (i+1) + ' ' + g.words.map(w => w.text).join(' ')">
+                <div class="tg-handle tg-handle-start"
+                     @mousedown.stop="onGroupHandleMouseDown($event, i, 'start')"
+                     title="Drag to adjust start time"></div>
+                <div class="tg-body"
+                     @mousedown.stop="onGroupHandleMouseDown($event, i, 'move')">
+                  <span class="timeline-group-label">
+                    {{ g.words.slice(0, 3).map(w => w.text).join(' ') }}{{ g.words.length > 3 ? '…' : '' }}
+                  </span>
+                </div>
+                <div class="tg-handle tg-handle-end"
+                     @mousedown.stop="onGroupHandleMouseDown($event, i, 'end')"
+                     title="Drag to adjust end time"></div>
+                <div v-if="groupDrag && groupDrag.gi === i" class="timeline-drag-tooltip">
+                  {{ fmtSec(g.start) }}s – {{ fmtSec(g.end) }}s
+                </div>
+              </div>
+            </template>
 
             <!-- Playhead — draggable -->
             <div class="timeline-playhead" 
