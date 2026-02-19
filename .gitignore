@@ -39,7 +39,7 @@ env/
 
 # Project-specific directories
 outputs/
-renders/
+rendered/
 uploads/
 __pycache__/
 .pytest_cache/
