@@ -102,6 +102,7 @@ export default {
   },
   template: `
     <div id="upload-view" class="view active">
+      <button class="btn btn-ghost back-btn" style="margin:1rem 1.5rem" @click="store.appMode = 'home'">← Back</button>
       <!-- Hero -->
       <div class="upload-hero">
         <h2>Subtitle your clips in seconds</h2>

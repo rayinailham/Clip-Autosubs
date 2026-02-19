@@ -5,6 +5,9 @@
 import { reactive } from 'vue';
 
 const store = reactive({
+  // ── App Mode ─────────────────────────────
+  appMode: 'home', // 'home' | 'subtitle' | 'vtuber'
+
   // ── Navigation ──────────────────────────
   currentView: 'upload', // 'upload' | 'editor'
 
@@ -90,6 +93,25 @@ const store = reactive({
     downloadUrl: '',
     downloadLabel: '',
     stats: null,  // stats object returned by backend when done
+  },
+
+  // ── VTuber Reframe ─────────────────────
+  reframe: {
+    videoFilename: '',
+    step: 'upload',  // 'upload' | 'editor'
+    // Top section: gameplay (top 40% of output)
+    top: { zoom: 1.0, panX: 0, panY: 0 },
+    // Bottom section: avatar (bottom 60% of output)
+    bottom: { zoom: 1.0, panX: 0, panY: 0 },
+    render: {
+      active: false,
+      status: '',
+      jobId: '',
+      done: false,
+      error: false,
+      downloadUrl: '',
+      downloadLabel: '',
+    },
   },});
 
 export default store;

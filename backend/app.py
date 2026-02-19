@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from renderer import check_ffmpeg, get_video_info, render_video
+from reframe_renderer import render_vtuber_short
 from silence_cutter import cut_silence
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
@@ -53,6 +54,9 @@ render_jobs: dict = {}
 
 # ─── In-memory cut-silence job tracker ───────────────────────
 cut_silence_jobs: dict = {}
+
+# ─── In-memory reframe job tracker ───────────────────────────
+reframe_jobs: dict = {}
 
 
 # ─── Pydantic Models ────────────────────────────────────────
@@ -143,6 +147,20 @@ class CutSilenceRequest(BaseModel):
 class SaveStyleRequest(BaseModel):
     video_filename: str
     style: StyleConfig
+
+
+class ReframeRequest(BaseModel):
+    video_filename: str
+    top_zoom: float = 1.0
+    top_pan_x: float = 0.0   # −100 … +100
+    top_pan_y: float = 0.0
+    bottom_zoom: float = 1.0
+    bottom_pan_x: float = 0.0
+    bottom_pan_y: float = 0.0
+    out_width: int = 1080
+    out_height: int = 1920
+    crf: int = 18
+    preset: str = "medium"
 
 
 class RenderRequest(BaseModel):
@@ -510,6 +528,110 @@ async def get_cut_silence_status(job_id: str):
     if job_id not in cut_silence_jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     return cut_silence_jobs[job_id]
+
+
+# ─── Upload-only (for Reframe / VTuber short) ───────────────
+
+@app.post("/upload-only")
+async def upload_only(file: UploadFile = File(...)):
+    """
+    Upload a video file without transcribing it.
+    Used by the VTuber Reframe workflow.
+    """
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
+    upload_path = UPLOAD_DIR / file.filename
+    try:
+        with open(upload_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+    finally:
+        await file.close()
+
+    file_size_mb = upload_path.stat().st_size / (1024 * 1024)
+    if file_size_mb > MAX_FILE_SIZE_MB:
+        upload_path.unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=400,
+            detail=f"File too large ({file_size_mb:.1f} MB). Max: {MAX_FILE_SIZE_MB} MB",
+        )
+
+    return {"filename": file.filename, "size_mb": round(file_size_mb, 1)}
+
+
+# ─── VTuber Short Reframe Render ─────────────────────────────
+
+def _do_reframe(job_id: str, req: ReframeRequest):
+    """Background task: render VTuber split-screen short."""
+    logs: list[str] = []
+
+    def progress(msg: str):
+        logs.append(msg)
+        reframe_jobs[job_id]["log"] = msg
+
+    try:
+        video_path = UPLOAD_DIR / req.video_filename
+        if not video_path.exists():
+            reframe_jobs[job_id] = {
+                "status": "error",
+                "error": f"Video file not found: {req.video_filename}",
+            }
+            return
+
+        reframe_jobs[job_id]["status"] = "processing"
+
+        output_filename = f"{video_path.stem}_vtuber_{job_id}.mp4"
+        output_path = RENDERED_DIR / output_filename
+
+        render_vtuber_short(
+            video_path=str(video_path),
+            output_path=str(output_path),
+            top_zoom=req.top_zoom,
+            top_pan_x=req.top_pan_x,
+            top_pan_y=req.top_pan_y,
+            bottom_zoom=req.bottom_zoom,
+            bottom_pan_x=req.bottom_pan_x,
+            bottom_pan_y=req.bottom_pan_y,
+            out_width=req.out_width,
+            out_height=req.out_height,
+            crf=req.crf,
+            preset=req.preset,
+            progress_cb=progress,
+        )
+
+        reframe_jobs[job_id] = {
+            "status": "done",
+            "filename": output_filename,
+            "url": f"/rendered/{output_filename}",
+            "size_mb": round(output_path.stat().st_size / (1024 * 1024), 1),
+        }
+
+    except Exception as e:
+        print(f"[reframe] Error: {e}")
+        reframe_jobs[job_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/render-reframe")
+async def start_reframe(req: ReframeRequest, background_tasks: BackgroundTasks):
+    """Start a background VTuber reframe render job. Returns job_id for polling."""
+    job_id = uuid.uuid4().hex[:8]
+    reframe_jobs[job_id] = {"status": "queued", "log": "Queued…"}
+    background_tasks.add_task(_do_reframe, job_id, req)
+    return {"job_id": job_id}
+
+
+@app.get("/reframe-status/{job_id}")
+async def get_reframe_status(job_id: str):
+    """Poll the status of a reframe render job."""
+    if job_id not in reframe_jobs:
+        raise HTTPException(status_code=404, detail="Reframe job not found")
+    return reframe_jobs[job_id]
 
 
 # ─── Static Files ──────────────────────────────────────────

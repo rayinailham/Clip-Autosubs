@@ -26,7 +26,7 @@ export default {
   },
   template: `
     <header>
-      <h1>Clipping Project</h1>
+      <h1 style="cursor:pointer" @click="store.appMode = 'home'">Clipping Project</h1>
       <div class="status-pills">
         <div class="pill">
           <span class="dot" :class="{ ok: store.gpu.available }"></span>

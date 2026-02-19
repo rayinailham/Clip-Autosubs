@@ -81,3 +81,34 @@ export async function pollCutSilenceStatus(jobId) {
 export function videoURL(filename) {
   return '/video/' + encodeURIComponent(filename);
 }
+
+// ── VTuber Reframe ──────────────────────────────────────────
+
+export async function uploadVideoOnly(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/upload-only', { method: 'POST', body: formData });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Upload failed');
+  }
+  return res.json();
+}
+
+export async function startReframeJob(payload) {
+  const res = await fetch('/render-reframe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Reframe render request failed');
+  }
+  return res.json();
+}
+
+export async function pollReframeStatus(jobId) {
+  const res = await fetch('/reframe-status/' + jobId);
+  return res.json();
+}
