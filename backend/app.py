@@ -30,7 +30,7 @@ from reframe_renderer import (
     render_shorts_blur_bg,
     render_shorts_black_bg,
 )
-from silence_cutter import cut_silence
+from silence_cutter import cut_silence, cut_video_segments
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
@@ -192,6 +192,7 @@ class RenderRequest(BaseModel):
     words: list[WordItem]
     word_groups: Optional[list[WordGroup]] = None  # Custom groups with timing control
     style: StyleConfig = StyleConfig()
+    active_segments: Optional[list[list[float]]] = None  # [[start, end], ...] segments to keep
 
 
 class TrimRequest(BaseModel):
@@ -312,10 +313,48 @@ async def serve_video(filename: str):
 
 # ─── Phase 2-4: Render with Subtitles ───────────────────────
 
+
+def _remap_time(t: float, segments: list[tuple[float, float]]) -> float:
+    """Map a timestamp from the original video to the cut video's timeline."""
+    offset = 0.0
+    for s, e in segments:
+        if t <= e:
+            if t >= s:
+                return round(offset + (t - s), 4)
+            return round(offset, 4)  # t was in a removed gap
+        offset += e - s
+    return round(offset, 4)
+
+
+def _remap_words_for_segments(
+    words: list[dict],
+    segments: list[tuple[float, float]],
+) -> list[dict]:
+    """
+    Filter + remap word timestamps to match a cut video.
+    Words outside all active segments are dropped.
+    """
+    result = []
+    for w in words:
+        # Keep word if it overlaps with any active segment
+        in_segment = any(w["start"] < e and w["end"] > s for s, e in segments)
+        if in_segment:
+            result.append({
+                **w,
+                "start": _remap_time(w["start"], segments),
+                "end": _remap_time(w["end"], segments),
+            })
+    return result
+
+
 def _do_render(render_id: str, req: RenderRequest):
     """Background task: generate ASS subtitles and burn into video."""
+    temp_cut_path = None
     try:
         video_path = UPLOAD_DIR / req.video_filename
+        # Also check rendered dir (e.g. for silence-cut files)
+        if not video_path.exists():
+            video_path = RENDERED_DIR / req.video_filename
         if not video_path.exists():
             render_jobs[render_id] = {
                 "status": "error",
@@ -325,16 +364,43 @@ def _do_render(render_id: str, req: RenderRequest):
 
         render_jobs[render_id]["status"] = "generating_subtitles"
 
-        # Get video resolution
-        info = get_video_info(str(video_path))
-
         # Prepare word dicts
         words_dicts = [w.model_dump() for w in req.words]
-        
+
         # Prepare custom groups if provided
         groups_dicts = None
         if req.word_groups and req.style.use_custom_groups:
             groups_dicts = [g.model_dump() for g in req.word_groups]
+
+        # ── Handle timeline cuts (active_segments) ──────────────────
+        actual_video_path = video_path
+        if req.active_segments and len(req.active_segments) > 0:
+            render_jobs[render_id]["status"] = "cutting_segments"
+            print(f"[render] Cutting {len(req.active_segments)} active segments…")
+
+            segments_tuples = [(s[0], s[1]) for s in req.active_segments]
+            temp_cut_path = RENDERED_DIR / f"{render_id}_temp_cut.mp4"
+
+            cut_video_segments(
+                video_path=str(video_path),
+                segments=segments_tuples,
+                output_path=str(temp_cut_path),
+            )
+            actual_video_path = temp_cut_path
+
+            # Remap word timestamps to match the cut video
+            words_dicts = _remap_words_for_segments(words_dicts, segments_tuples)
+
+            # Remap custom groups too
+            if groups_dicts:
+                for g in groups_dicts:
+                    g["start"] = _remap_time(g["start"], segments_tuples)
+                    g["end"] = _remap_time(g["end"], segments_tuples)
+
+            render_jobs[render_id]["status"] = "generating_subtitles"
+
+        # Get video resolution
+        info = get_video_info(str(actual_video_path))
 
         # Generate ASS subtitle file
         ass_content = generate_ass(
@@ -380,7 +446,7 @@ def _do_render(render_id: str, req: RenderRequest):
         output_filename = f"{video_path.stem}_captioned_{render_id}.mp4"
         output_path = RENDERED_DIR / output_filename
 
-        render_video(str(video_path), str(ass_path), str(output_path))
+        render_video(str(actual_video_path), str(ass_path), str(output_path))
 
         render_jobs[render_id] = {
             "status": "done",
@@ -392,6 +458,13 @@ def _do_render(render_id: str, req: RenderRequest):
     except Exception as e:
         print(f"[render] Error: {e}")
         render_jobs[render_id] = {"status": "error", "error": str(e)}
+    finally:
+        # Clean up temporary cut file
+        if temp_cut_path and temp_cut_path.exists():
+            try:
+                temp_cut_path.unlink()
+            except OSError:
+                pass
 
 
 @app.post("/render")

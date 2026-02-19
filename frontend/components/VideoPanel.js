@@ -1,5 +1,5 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
-import store, { getActiveGroups } from '../store.js';
+import store, { getActiveGroups, getSegments } from '../store.js';
 import { videoURL } from '../api.js';
 
 export default {
@@ -12,7 +12,30 @@ export default {
 
     function onTimeUpdate() {
       if (!videoEl.value) return;
-      const t = videoEl.value.currentTime;
+      const v = videoEl.value;
+      const t = v.currentTime;
+
+      // ── Skip removed segments during playback ──────────────────
+      if (store.splitPoints.length > 0 && !v.paused) {
+        const dur = v.duration || 0;
+        if (dur > 0) {
+          const segs = getSegments(dur);
+          // Check if current time is inside a removed segment
+          for (const seg of segs) {
+            if (!seg.active && t >= seg.start && t < seg.end - 0.05) {
+              // Find the next active segment after this one
+              const nextActive = segs.find(s => s.active && s.start >= seg.start);
+              if (nextActive) {
+                v.currentTime = nextActive.start;
+              } else {
+                // No more active segments — pause at the end
+                v.pause();
+              }
+              return;
+            }
+          }
+        }
+      }
       const s = store.style;
       const upper = s.uppercase;
       const italic = s.italic;

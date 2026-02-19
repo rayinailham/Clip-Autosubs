@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import store, { getStyleConfig } from '../store.js';
+import store, { getStyleConfig, getSegments } from '../store.js';
 import { startRenderJob, pollRenderStatus } from '../api.js';
 
 export default {
@@ -31,6 +31,20 @@ export default {
         };
         if (store.useCustomGroups && store.customGroups.length > 0) {
           payload.word_groups = store.customGroups;
+        }
+        // Include timeline cuts if any segments are removed
+        if (store.splitPoints.length > 0 && store.removedSegments.length > 0) {
+          const v = document.getElementById('editor-video');
+          const dur = v ? v.duration : (store.metadata?.duration || 0);
+          if (dur > 0) {
+            const segs = getSegments(dur);
+            const activeSegs = segs
+              .filter(s => s.active)
+              .map(s => [s.start, s.end]);
+            if (activeSegs.length > 0 && activeSegs.length < segs.length) {
+              payload.active_segments = activeSegs;
+            }
+          }
         }
         const { render_id } = await startRenderJob(payload);
         startPolling(render_id);

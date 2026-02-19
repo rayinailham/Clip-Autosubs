@@ -4,12 +4,13 @@ Silence Cutter — Remove silent gaps from video using WhisperX word timestamps.
 Strategy:
   1. Derive speech "keep" segments from word start/end timestamps + padding.
   2. Merge segments whose gap is smaller than the silence threshold.
-  3. Use FFmpeg concat demuxer (inpoint/outpoint) with -c copy for a
-     quality-preserving output — no re-encoding, no quality loss.
+  3. Use FFmpeg filter_complex with trim/atrim + concat for frame-accurate
+     cutting — no audio looping or keyframe-seeking artifacts.
 
 FFmpeg requirement: 3.0+ (practically universal).
 """
 
+import json
 import os
 import subprocess
 import tempfile
@@ -18,6 +19,122 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from renderer import get_video_info
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Audio detection helper
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _has_audio_stream(video_path: str) -> bool:
+    """Return True if the file contains at least one audio stream."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "quiet",
+                "-select_streams", "a",
+                "-show_entries", "stream=codec_type",
+                "-of", "csv=p=0",
+                str(video_path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return True  # assume audio exists if probing fails
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Standalone segment cutter (reusable by render pipeline)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def cut_video_segments(
+    video_path: str,
+    segments: list[tuple[float, float]],
+    output_path: str,
+    progress_cb: Optional[Callable[[str], None]] = None,
+) -> None:
+    """
+    Cut a video to only include the given (start, end) segments.
+
+    Uses FFmpeg filter_complex with trim/atrim + concat for frame-accurate
+    cutting without audio looping artifacts.
+    """
+    def log(msg: str):
+        print(f"[cut_segments] {msg}")
+        if progress_cb:
+            progress_cb(msg)
+
+    video_path_p = Path(video_path).resolve()
+    output_path_p = Path(output_path).resolve()
+    output_path_p.parent.mkdir(parents=True, exist_ok=True)
+
+    has_audio = _has_audio_stream(str(video_path_p))
+
+    filter_parts = []
+    stream_labels = []
+
+    for i, (start, end) in enumerate(segments):
+        filter_parts.append(
+            f"[0:v]trim=start={start:.4f}:end={end:.4f},setpts=PTS-STARTPTS[v{i}]"
+        )
+        if has_audio:
+            filter_parts.append(
+                f"[0:a]atrim=start={start:.4f}:end={end:.4f},asetpts=PTS-STARTPTS[a{i}]"
+            )
+            stream_labels.append(f"[v{i}][a{i}]")
+        else:
+            stream_labels.append(f"[v{i}]")
+
+    n = len(segments)
+    concat_inputs = "".join(stream_labels)
+    if has_audio:
+        filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]")
+    else:
+        filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=0[outv]")
+
+    filter_complex = ";\n".join(filter_parts)
+
+    filter_script = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".txt", delete=False, encoding="utf-8",
+        ) as f:
+            filter_script = f.name
+            f.write(filter_complex)
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path_p),
+            "-filter_complex_script", filter_script,
+            "-map", "[outv]",
+        ]
+        if has_audio:
+            cmd.extend(["-map", "[outa]"])
+        cmd.extend([
+            "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+        ])
+        if has_audio:
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-movflags", "+faststart", str(output_path_p)])
+
+        log(f"Cutting {n} segments…")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-1200:] if result.stderr else "No stderr"
+            raise RuntimeError(f"FFmpeg cut failed (code {result.returncode}):\n{stderr_tail}")
+
+        if not output_path_p.exists():
+            raise RuntimeError("FFmpeg exited 0 but output file was not created.")
+
+    finally:
+        if filter_script and os.path.exists(filter_script):
+            try:
+                os.unlink(filter_script)
+            except OSError:
+                pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -101,8 +218,8 @@ def cut_silence(
     """
     Remove silent gaps from *video_path* and write to *output_path*.
 
-    Uses FFmpeg's concat demuxer with ``-c copy`` so the video stream is
-    never re-encoded — same bitrate, same codec, same quality.
+    Uses FFmpeg filter_complex with trim/atrim + concat for frame-accurate
+    cutting without audio looping artifacts.
 
     Args:
         video_path:     Absolute path to the source video.
@@ -155,43 +272,84 @@ def cut_silence(
         f"{100 * kept_duration / duration:.0f}% of original"
     )
 
-    # ── Build concat demuxer file ────────────────────────────────────────────
-    # The concat demuxer with inpoint/outpoint can reference the same source
-    # file multiple times — efficient and avoids temporary clips.
-    safe_src = str(video_path).replace("\\", "/")
+    # ── Check for audio stream ───────────────────────────────────────────────
+    has_audio = _has_audio_stream(str(video_path))
+    if has_audio:
+        log("Audio stream detected — will trim both video and audio.")
+    else:
+        log("No audio stream — trimming video only.")
 
-    concat_file = None
+    # ── Build filter_complex with trim/atrim ──────────────────────────────
+    # Using trim/atrim + concat filter is frame-accurate and avoids the
+    # audio looping artifacts caused by the concat demuxer's
+    # inpoint/outpoint keyframe-seeking behavior.
+    filter_script = None
     try:
+        filter_parts = []
+        stream_labels = []
+
+        for i, (start, end) in enumerate(segments):
+            filter_parts.append(
+                f"[0:v]trim=start={start:.4f}:end={end:.4f},setpts=PTS-STARTPTS[v{i}]"
+            )
+            if has_audio:
+                filter_parts.append(
+                    f"[0:a]atrim=start={start:.4f}:end={end:.4f},asetpts=PTS-STARTPTS[a{i}]"
+                )
+                stream_labels.append(f"[v{i}][a{i}]")
+            else:
+                stream_labels.append(f"[v{i}]")
+
+        n = len(segments)
+        concat_inputs = "".join(stream_labels)
+        if has_audio:
+            filter_parts.append(
+                f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]"
+            )
+        else:
+            filter_parts.append(
+                f"{concat_inputs}concat=n={n}:v=1:a=0[outv]"
+            )
+
+        filter_complex = ";\n".join(filter_parts)
+
+        # Write filter graph to a script file to avoid Windows
+        # command-line length limits (8191 chars) for many segments
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".txt",
             delete=False,
             encoding="utf-8",
         ) as f:
-            concat_file = f.name
-            for start, end in segments:
-                f.write(f"file '{safe_src}'\n")
-                f.write(f"inpoint {start:.4f}\n")
-                f.write(f"outpoint {end:.4f}\n")
+            filter_script = f.name
+            f.write(filter_complex)
 
-        log(f"Concat list written: {concat_file}")
-        log("Running FFmpeg (stream copy — no re-encoding)…")
+        log(f"Filter script written ({len(segments)} segments): {filter_script}")
+        log("Running FFmpeg (trim + concat — frame-accurate)…")
 
         cmd = [
             "ffmpeg", "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concat_file,
-            "-c:v", "libx264",          # re-encode video to avoid keyframe/timestamp issues
-            "-crf", "18",               # high quality (visually lossless)
-            "-preset", "fast",
-            "-c:a", "aac",              # re-encode audio to fix concat timestamp issues
-            "-b:a", "192k",
-            "-avoid_negative_ts", "make_zero",  # fix negative timestamps
-            "-fflags", "+genpts",       # regenerate presentation timestamps
-            "-movflags", "+faststart",  # browser-friendly MP4
-            str(output_path),
+            "-i", str(video_path),
+            "-filter_complex_script", filter_script,
+            "-map", "[outv]",
         ]
+        if has_audio:
+            cmd.extend(["-map", "[outa]"])
+
+        cmd.extend([
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "fast",
+        ])
+        if has_audio:
+            cmd.extend([
+                "-c:a", "aac",
+                "-b:a", "192k",
+            ])
+        cmd.extend([
+            "-movflags", "+faststart",
+            str(output_path),
+        ])
 
         log(f"Command: {' '.join(cmd)}")
 
@@ -203,7 +361,6 @@ def cut_silence(
         )
 
         if result.returncode != 0:
-            # Tail of stderr is usually most informative
             stderr_tail = result.stderr[-1200:] if result.stderr else "No stderr"
             raise RuntimeError(f"FFmpeg failed (code {result.returncode}):\n{stderr_tail}")
 
@@ -211,9 +368,9 @@ def cut_silence(
             raise RuntimeError("FFmpeg exited 0 but output file was not created.")
 
     finally:
-        if concat_file and os.path.exists(concat_file):
+        if filter_script and os.path.exists(filter_script):
             try:
-                os.unlink(concat_file)
+                os.unlink(filter_script)
             except OSError:
                 pass
 

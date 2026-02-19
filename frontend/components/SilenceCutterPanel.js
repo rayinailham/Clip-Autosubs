@@ -8,7 +8,7 @@
 import { computed } from 'vue';
 import store from '../store.js';
 import { startCutSilenceJob, pollCutSilenceStatus } from '../api.js';
-import { saveUndoSnapshot } from '../store.js';
+import { saveUndoSnapshot, regenerateAutoGroups } from '../store.js';
 
 // ── Remap word timestamps to new silence-cut timeline ────────────────────────
 function remapTime(t, segments) {
@@ -35,7 +35,23 @@ function applyToEditor(filename, segments) {
   saveUndoSnapshot('Cut silence');
   if (segments && segments.length > 0) {
     store.words = remapWords(store.words, segments);
+    // Update custom group timings to match remapped word timestamps
+    if (store.useCustomGroups && store.customGroups.length > 0) {
+      for (const g of store.customGroups) {
+        const wordsInGroup = g.word_indices.map(i => store.words[i]).filter(Boolean);
+        if (wordsInGroup.length > 0) {
+          g.start = wordsInGroup[0].start;
+          g.end = wordsInGroup[wordsInGroup.length - 1].end;
+        }
+      }
+    } else {
+      // Regenerate auto groups with new timestamps
+      regenerateAutoGroups();
+    }
   }
+  // Reset split points — they reference old timestamps and are now invalid
+  store.splitPoints = [];
+  store.removedSegments = [];
   store.videoFilename = filename;
 }
 
