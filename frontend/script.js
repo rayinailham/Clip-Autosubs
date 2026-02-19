@@ -5,6 +5,7 @@ let currentMetadata = {};
 let selectedWordIndices = new Set(); // For word selection
 let customGroups = [];  // Custom groups with timing
 let useCustomGroups = false;
+let useDynamicMode = true;  // true = per-word highlighting, false = static sentence
 let undoStack = [];  // Stack of undo snapshots
 const MAX_UNDO = 50;
 
@@ -34,12 +35,19 @@ const controls = {
   uppercase: $('#ctrl-uppercase'),
   highlight: $('#ctrl-highlight'),
   textColor: $('#ctrl-textcolor'),
+  textColorStatic: $('#ctrl-textcolor-static'),
   outlineColor: $('#ctrl-outlinecolor'),
   shadowColor: $('#ctrl-shadowcolor'),
   outline: $('#ctrl-outline'),
   shadow: $('#ctrl-shadow'),
+  glow: $('#ctrl-glow'),
+  glowColor: $('#ctrl-glowcolor'),
   scale: $('#ctrl-scale'),
   animation: $('#ctrl-animation'),
+  groupAnimation: $('#ctrl-groupanimation'),
+  animSpeed: $('#ctrl-animspeed'),
+  sentenceAnimation: $('#ctrl-sentenceanimation'),
+  staticAnimSpeed: $('#ctrl-staticanimspeed'),
   position: $('#ctrl-position'),
   marginV: $('#ctrl-marginv'),
   marginH: $('#ctrl-marginh'),
@@ -48,14 +56,316 @@ const controls = {
   wpg: $('#ctrl-wpg'),
 };
 
+// ── Style Presets for Dynamic Mode ────────────────
+const DYNAMIC_PRESETS = {
+  vtuber: {
+    name: 'VTuber Pop',
+    fontFamily: 'Bangers',
+    fontSize: 85,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    highlight: '#FFD700',
+    textColor: '#FFFFFF',
+    outlineColor: '#FF1493',
+    shadowColor: '#000000',
+    outline: 5,
+    shadow: 3,
+    glow: 8,
+    glowColor: '#FFD700',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'pop-in',
+    animSpeed: 200,
+  },
+  neon: {
+    name: 'Neon',
+    fontFamily: 'Bebas Neue',
+    fontSize: 80,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    highlight: '#00FFFF',
+    textColor: '#FF00FF',
+    outlineColor: '#000000',
+    shadowColor: '#00FFFF',
+    outline: 2,
+    shadow: 0,
+    glow: 15,
+    glowColor: '#00FFFF',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'fade-in',
+    animSpeed: 300,
+  },
+  anime: {
+    name: 'Anime Bold',
+    fontFamily: 'Anton',
+    fontSize: 90,
+    bold: true,
+    italic: true,
+    uppercase: true,
+    highlight: '#FF4444',
+    textColor: '#FFFFFF',
+    outlineColor: '#000000',
+    shadowColor: '#FF4444',
+    outline: 6,
+    shadow: 4,
+    glow: 5,
+    glowColor: '#FF4444',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'slide-up',
+    animSpeed: 150,
+  },
+  clean: {
+    name: 'Clean',
+    fontFamily: 'Montserrat',
+    fontSize: 70,
+    bold: true,
+    italic: false,
+    uppercase: false,
+    highlight: '#FFD700',
+    textColor: '#FFFFFF',
+    outlineColor: '#000000',
+    shadowColor: '#000000',
+    outline: 3,
+    shadow: 2,
+    glow: 0,
+    glowColor: '#FFFFFF',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'fade-in',
+    animSpeed: 250,
+  },
+  retro: {
+    name: 'Retro',
+    fontFamily: 'Bungee',
+    fontSize: 75,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    highlight: '#FFD700',
+    textColor: '#FF6B6B',
+    outlineColor: '#2D0A4E',
+    shadowColor: '#2D0A4E',
+    outline: 4,
+    shadow: 5,
+    glow: 0,
+    glowColor: '#FF6B6B',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'typewriter',
+    animSpeed: 100,
+  },
+  idol: {
+    name: 'Idol',
+    fontFamily: 'Poppins',
+    fontSize: 75,
+    bold: true,
+    italic: false,
+    uppercase: false,
+    highlight: '#FFB7DD',
+    textColor: '#FFFFFF',
+    outlineColor: '#FF69B4',
+    shadowColor: '#FFB7DD',
+    outline: 3,
+    shadow: 2,
+    glow: 12,
+    glowColor: '#FFB7DD',
+    scale: 100,
+    animation: 'color-only',
+    groupAnimation: 'pop-in',
+    animSpeed: 180,
+  },
+};
+
+// ── Style Presets for Static Mode ─────────────────
+const STATIC_PRESETS = {
+  classic: {
+    name: 'Classic',
+    fontFamily: 'Arial Black',
+    fontSize: 70,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    textColor: '#FFFFFF',
+    outlineColor: '#000000',
+    shadowColor: '#000000',
+    outline: 4,
+    shadow: 2,
+    glow: 0,
+    glowColor: '#FFFFFF',
+    sentenceAnimation: 'fade-in',
+    animSpeed: 300,
+  },
+  cinematic: {
+    name: 'Cinematic',
+    fontFamily: 'Bebas Neue',
+    fontSize: 65,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    textColor: '#FFFFFF',
+    outlineColor: '#000000',
+    shadowColor: '#000000',
+    outline: 2,
+    shadow: 3,
+    glow: 0,
+    glowColor: '#FFFFFF',
+    sentenceAnimation: 'fade-in',
+    animSpeed: 400,
+  },
+  minimal: {
+    name: 'Minimal',
+    fontFamily: 'Montserrat',
+    fontSize: 60,
+    bold: true,
+    italic: false,
+    uppercase: false,
+    textColor: '#FFFFFF',
+    outlineColor: '#333333',
+    shadowColor: '#000000',
+    outline: 2,
+    shadow: 1,
+    glow: 0,
+    glowColor: '#FFFFFF',
+    sentenceAnimation: 'none',
+    animSpeed: 200,
+  },
+  neonStatic: {
+    name: 'Neon Glow',
+    fontFamily: 'Bebas Neue',
+    fontSize: 75,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    textColor: '#00FFFF',
+    outlineColor: '#000000',
+    shadowColor: '#000000',
+    outline: 2,
+    shadow: 0,
+    glow: 15,
+    glowColor: '#00FFFF',
+    sentenceAnimation: 'fade-in',
+    animSpeed: 350,
+  },
+  retrostatic: {
+    name: 'Retro VHS',
+    fontFamily: 'Bungee',
+    fontSize: 70,
+    bold: true,
+    italic: false,
+    uppercase: true,
+    textColor: '#FF6B6B',
+    outlineColor: '#2D0A4E',
+    shadowColor: '#2D0A4E',
+    outline: 4,
+    shadow: 5,
+    glow: 0,
+    glowColor: '#FF6B6B',
+    sentenceAnimation: 'slide-up',
+    animSpeed: 250,
+  },
+  elegant: {
+    name: 'Elegant',
+    fontFamily: 'Poppins',
+    fontSize: 65,
+    bold: true,
+    italic: true,
+    uppercase: false,
+    textColor: '#FFEFD5',
+    outlineColor: '#2C1810',
+    shadowColor: '#1A0F0A',
+    outline: 3,
+    shadow: 2,
+    glow: 5,
+    glowColor: '#FFD700',
+    sentenceAnimation: 'fade-in',
+    animSpeed: 400,
+  },
+};
+
+// Legacy alias for compatibility
+const STYLE_PRESETS = DYNAMIC_PRESETS;
+
+// ── Emotion Presets (for per-word styling) ────────
+const EMOTION_PRESETS = {
+  angry: {
+    name: 'Angry',
+    highlight_color: 'FF0000',
+    normal_color: 'CC0000',
+    outline_color: '000000',
+    font_size_mult: 1.2,
+    shake: true,
+  },
+  creepy: {
+    name: 'Creepy',
+    highlight_color: '00FF00',
+    normal_color: '006600',
+    outline_color: '000000',
+    font_name: 'Creepster',
+    font_size_mult: 1.1,
+  },
+  shy: {
+    name: 'Shy',
+    highlight_color: 'FFB6C1',
+    normal_color: 'FFC0CB',
+    outline_color: 'FF69B4',
+    font_size_mult: 0.9,
+  },
+  gloomy: {
+    name: 'Gloomy',
+    highlight_color: '6B7B8C',
+    normal_color: '4A5568',
+    outline_color: '1A202C',
+    font_size_mult: 0.95,
+  },
+  bright: {
+    name: 'Bright',
+    highlight_color: 'FFFF00',
+    normal_color: 'FFF700',
+    outline_color: 'FF8C00',
+    font_size_mult: 1.15,
+  },
+  energetic: {
+    name: 'Energetic',
+    highlight_color: 'FF6600',
+    normal_color: 'FFAA00',
+    outline_color: 'FF0000',
+    font_size_mult: 1.25,
+  },
+  obnoxious: {
+    name: 'Obnoxious',
+    highlight_color: 'FF00FF',
+    normal_color: '00FFFF',
+    outline_color: 'FFFF00',
+    font_size_mult: 1.3,
+    rainbow: true,
+  },
+  romantic: {
+    name: 'Romantic',
+    highlight_color: 'FF1493',
+    normal_color: 'FF69B4',
+    outline_color: 'C71585',
+    font_size_mult: 1.05,
+  },
+};
+
+let currentPreset = 'vtuber';
+
 // Range value displays
 const setupRangeDisplay = (ctrl, valEl) => {
+  if (!ctrl || !valEl) return;
   ctrl.oninput = () => { valEl.textContent = ctrl.value; };
 };
 setupRangeDisplay(controls.fontSize, $('#val-fontsize'));
 setupRangeDisplay(controls.outline, $('#val-outline'));
 setupRangeDisplay(controls.shadow, $('#val-shadow'));
+setupRangeDisplay(controls.glow, $('#val-glow'));
 setupRangeDisplay(controls.scale, $('#val-scale'));
+setupRangeDisplay(controls.animSpeed, $('#val-animspeed'));
+setupRangeDisplay(controls.staticAnimSpeed, $('#val-staticanimspeed'));
 setupRangeDisplay(controls.marginV, $('#val-marginv'));
 setupRangeDisplay(controls.marginH, $('#val-marginh'));
 setupRangeDisplay(controls.letterSpacing, $('#val-letterspacing'));
@@ -79,6 +389,189 @@ controls.wpg.oninput = () => {
     regenerateAutoGroups();
   }
 };
+
+// Sync static text color with dynamic text color control
+if (controls.textColorStatic) {
+  controls.textColorStatic.oninput = () => {
+    controls.textColor.value = controls.textColorStatic.value;
+  };
+}
+
+// ── Preset Application ────────────────────────────
+function applyDynamicPreset(presetName) {
+  const preset = DYNAMIC_PRESETS[presetName];
+  if (!preset) return;
+
+  currentPreset = presetName;
+
+  // Update UI buttons
+  $$('#dynamic-presets-section .preset-btn').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = $(`#dynamic-presets-section .preset-btn[data-preset="${presetName}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  // Apply preset values to controls
+  controls.fontFamily.value = preset.fontFamily;
+  controls.fontSize.value = preset.fontSize;
+  $('#val-fontsize').textContent = preset.fontSize;
+  controls.bold.checked = preset.bold;
+  controls.italic.checked = preset.italic;
+  controls.uppercase.checked = preset.uppercase;
+  controls.highlight.value = preset.highlight;
+  controls.textColor.value = preset.textColor;
+  controls.outlineColor.value = preset.outlineColor;
+  controls.shadowColor.value = preset.shadowColor;
+  controls.outline.value = preset.outline;
+  $('#val-outline').textContent = preset.outline;
+  controls.shadow.value = preset.shadow;
+  $('#val-shadow').textContent = preset.shadow;
+  controls.glow.value = preset.glow;
+  $('#val-glow').textContent = preset.glow;
+  controls.glowColor.value = preset.glowColor;
+  controls.scale.value = preset.scale;
+  $('#val-scale').textContent = preset.scale;
+  controls.animation.value = preset.animation;
+  controls.groupAnimation.value = preset.groupAnimation;
+  controls.animSpeed.value = preset.animSpeed;
+  $('#val-animspeed').textContent = preset.animSpeed;
+
+  updatePreviewOnChange();
+}
+
+function applyStaticPreset(presetName) {
+  const preset = STATIC_PRESETS[presetName];
+  if (!preset) return;
+
+  currentPreset = presetName;
+
+  // Update UI buttons
+  $$('#static-presets-section .preset-btn').forEach(btn => btn.classList.remove('active'));
+  const activeBtn = $(`#static-presets-section .preset-btn[data-preset="${presetName}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
+
+  // Apply preset values to controls
+  controls.fontFamily.value = preset.fontFamily;
+  controls.fontSize.value = preset.fontSize;
+  $('#val-fontsize').textContent = preset.fontSize;
+  controls.bold.checked = preset.bold;
+  controls.italic.checked = preset.italic;
+  controls.uppercase.checked = preset.uppercase;
+  controls.textColor.value = preset.textColor;
+  if (controls.textColorStatic) {
+    controls.textColorStatic.value = preset.textColor;
+  }
+  controls.outlineColor.value = preset.outlineColor;
+  controls.shadowColor.value = preset.shadowColor;
+  controls.outline.value = preset.outline;
+  $('#val-outline').textContent = preset.outline;
+  controls.shadow.value = preset.shadow;
+  $('#val-shadow').textContent = preset.shadow;
+  controls.glow.value = preset.glow;
+  $('#val-glow').textContent = preset.glow;
+  controls.glowColor.value = preset.glowColor;
+  
+  // Static-specific controls
+  if (controls.sentenceAnimation) {
+    controls.sentenceAnimation.value = preset.sentenceAnimation;
+  }
+  if (controls.staticAnimSpeed) {
+    controls.staticAnimSpeed.value = preset.animSpeed;
+    const speedVal = $('#val-staticanimspeed');
+    if (speedVal) speedVal.textContent = preset.animSpeed;
+  }
+
+  updatePreviewOnChange();
+}
+
+// Legacy function for backward compatibility
+function applyPreset(presetName) {
+  if (useDynamicMode) {
+    applyDynamicPreset(presetName);
+  } else {
+    applyStaticPreset(presetName);
+  }
+}
+
+function applyEmotion(emotionName) {
+  const emotion = EMOTION_PRESETS[emotionName];
+  if (!emotion) return;
+
+  if (selectedWordIndices.size === 0) {
+    // Show hint
+    const info = $('#emotion-info');
+    info.textContent = '⚠️ Select words first, then apply emotion';
+    info.classList.add('warning');
+    setTimeout(() => {
+      info.textContent = 'Select words, then click an emotion to apply';
+      info.classList.remove('warning');
+    }, 2000);
+    return;
+  }
+
+  // Calculate base font size for scaling
+  const baseFontSize = parseInt(controls.fontSize.value) || 80;
+
+  // Apply emotion to selected words
+  selectedWordIndices.forEach(idx => {
+    if (!currentWords[idx].style) currentWords[idx].style = {};
+    currentWords[idx].style.highlight_color = emotion.highlight_color;
+    currentWords[idx].style.normal_color = emotion.normal_color;
+    currentWords[idx].style.outline_color = emotion.outline_color;
+    if (emotion.font_name) {
+      currentWords[idx].style.font_name = emotion.font_name;
+    }
+    if (emotion.font_size_mult) {
+      currentWords[idx].style.font_size = Math.round(baseFontSize * emotion.font_size_mult);
+    }
+  });
+
+  renderTranscript();
+  
+  // Visual feedback
+  const info = $('#emotion-info');
+  info.textContent = `✓ Applied "${emotion.name}" to ${selectedWordIndices.size} word(s)`;
+  setTimeout(() => {
+    info.textContent = 'Select words, then click an emotion to apply';
+  }, 2000);
+}
+
+// ── Subtitle Mode Toggle ──────────────────────────
+function setSubtitleMode(mode) {
+  useDynamicMode = (mode === 'dynamic');
+  
+  // Update toggle buttons
+  $('#mode-dynamic').classList.toggle('active', useDynamicMode);
+  $('#mode-static').classList.toggle('active', !useDynamicMode);
+  
+  // Show/hide dynamic-only elements
+  $$('.dynamic-only').forEach(el => {
+    el.style.display = useDynamicMode ? '' : 'none';
+  });
+  
+  // Show/hide static-only elements
+  $$('.static-only').forEach(el => {
+    el.style.display = useDynamicMode ? 'none' : '';
+  });
+  
+  // Sync text color between static and dynamic controls
+  if (!useDynamicMode) {
+    // When switching to static, sync the static color control with the normal text color
+    if (controls.textColorStatic) {
+      controls.textColorStatic.value = controls.textColor.value;
+    }
+  } else {
+    // When switching to dynamic, sync back
+    if (controls.textColorStatic) {
+      controls.textColor.value = controls.textColorStatic.value;
+    }
+  }
+  
+  // Apply appropriate default preset when switching modes
+  if (useDynamicMode) {
+    applyDynamicPreset('vtuber');
+  } else {
+    applyStaticPreset('classic');
+  }
+}
 
 // ── Tab Switching ─────────────────────────────────
 function switchTab(tabName) {
@@ -268,6 +761,13 @@ function openEditor() {
   renderTranscript();
   showView('editor-view');
   video.addEventListener('timeupdate', onTimeUpdate);
+  
+  // Apply default preset based on current mode
+  if (useDynamicMode) {
+    applyDynamicPreset('vtuber');
+  } else {
+    applyStaticPreset('classic');
+  }
 }
 
 // ── Transcript rendering ──────────────────────────
@@ -681,10 +1181,17 @@ function onTimeUpdate() {
   const t = video.currentTime;
   const upper = controls.uppercase.checked;
   const highlightColor = controls.highlight.value;
-  const textColor = controls.textColor.value;
+  // Use static text color control in static mode, fallback to normal textColor
+  const textColor = useDynamicMode 
+    ? controls.textColor.value 
+    : (controls.textColorStatic?.value || controls.textColor.value);
   const fontSizeASS = parseInt(controls.fontSize.value) || 80;
   const fontFamily = controls.fontFamily.value;
   const scale = parseInt(controls.scale.value) / 100;
+  const glowStrength = parseInt(controls.glow.value) || 0;
+  const glowColor = controls.glowColor.value;
+  const outlineColor = controls.outlineColor.value;
+  const outlineWidth = parseInt(controls.outline.value) || 4;
   const groups = getActiveGroups();
 
   // Scale font size proportionally: ASS font_size is relative to video height.
@@ -693,6 +1200,17 @@ function onTimeUpdate() {
   const displayedHeight = videoEl.clientHeight || videoEl.offsetHeight || 1;
   const actualHeight = videoEl.videoHeight || currentMetadata.height || 1080;
   const scaledFontSize = (fontSizeASS * displayedHeight / actualHeight) + 'px';
+
+  // Calculate glow text-shadow
+  const scaledOutline = Math.max(1, Math.round(outlineWidth * displayedHeight / actualHeight / 2));
+  const scaledGlow = Math.round(glowStrength * displayedHeight / actualHeight);
+  let textShadow = `${scaledOutline}px ${scaledOutline}px 0 ${outlineColor}, ` +
+                   `-${scaledOutline}px -${scaledOutline}px 0 ${outlineColor}, ` +
+                   `${scaledOutline}px -${scaledOutline}px 0 ${outlineColor}, ` +
+                   `-${scaledOutline}px ${scaledOutline}px 0 ${outlineColor}`;
+  if (glowStrength > 0) {
+    textShadow += `, 0 0 ${scaledGlow}px ${glowColor}, 0 0 ${scaledGlow * 2}px ${glowColor}`;
+  }
 
   // Find active group
   let activeGroup = null;
@@ -731,6 +1249,7 @@ function onTimeUpdate() {
   subtitlePreview.style.fontFamily = fontFamily + ', Impact, sans-serif';
   subtitlePreview.style.letterSpacing = (parseInt(controls.letterSpacing.value) || 0) + 'px';
   subtitlePreview.style.wordSpacing = (parseInt(controls.wordGap.value) || 0) * 4 + 'px';
+  subtitlePreview.style.textShadow = textShadow;
 
   // Scale margin_v proportionally so bottom position matches rendered output
   const marginVASS = parseInt(controls.marginV.value) || 60;
@@ -741,6 +1260,15 @@ function onTimeUpdate() {
     subtitlePreview.style.paddingTop = scaledMarginV + 'px';
   }
 
+  // Static mode: show whole sentence in normal color
+  if (!useDynamicMode) {
+    const sentence = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text).join(' ');
+    subtitlePreview.innerHTML = `<span class="subtitle-word" style="color:${textColor};">${sentence}</span>`;
+    $$('.word-chip.playing').forEach(el => el.classList.remove('playing'));
+    return;
+  }
+
+  // Dynamic mode: per-word highlighting
   subtitlePreview.innerHTML = activeGroup.words.map((w, i) => {
     const text = upper ? w.text.toUpperCase() : w.text;
     const isActive = i === activeIdx;
@@ -783,23 +1311,34 @@ function getStyleConfig() {
   return {
     words_per_group: parseInt(controls.wpg.value) || 4,
     use_custom_groups: useCustomGroups,
+    dynamic_mode: useDynamicMode,
     font_name: controls.fontFamily.value,
     font_size: parseInt(controls.fontSize.value) || 80,
     bold: controls.bold.checked,
     italic: controls.italic.checked,
     highlight_color: controls.highlight.value.replace('#', ''),
-    normal_color: controls.textColor.value.replace('#', ''),
+    normal_color: useDynamicMode 
+      ? controls.textColor.value.replace('#', '')
+      : (controls.textColorStatic?.value || controls.textColor.value).replace('#', ''),
     outline_color: controls.outlineColor.value.replace('#', ''),
     shadow_color: controls.shadowColor.value.replace('#', ''),
     outline_width: parseInt(controls.outline.value) || 4,
     shadow_depth: parseInt(controls.shadow.value) || 2,
+    glow_strength: parseInt(controls.glow.value) || 0,
+    glow_color: controls.glowColor.value.replace('#', ''),
     position: controls.position.value,
     margin_v: parseInt(controls.marginV.value) || 60,
     margin_h: parseInt(controls.marginH.value) || 10,
     letter_spacing: parseInt(controls.letterSpacing.value) || 0,
     word_gap: parseInt(controls.wordGap.value) || 0,
-    scale_highlight: parseInt(controls.scale.value) || 115,
+    scale_highlight: parseInt(controls.scale.value) || 100,
+    // Dynamic mode animation
     animation: controls.animation.value,
+    group_animation: controls.groupAnimation.value,
+    anim_speed: parseInt(controls.animSpeed.value) || 200,
+    // Static mode animation
+    sentence_animation: controls.sentenceAnimation?.value || 'fade-in',
+    static_anim_speed: parseInt(controls.staticAnimSpeed?.value) || 300,
     uppercase: controls.uppercase.checked,
   };
 }

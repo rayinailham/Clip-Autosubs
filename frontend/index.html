@@ -6,7 +6,7 @@
   <title>Clipping Project — Dynamic Subtitles</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Bangers&family=Bebas+Neue&family=Anton&family=Oswald:wght@700&family=Creepster&family=Permanent+Marker&family=Comic+Neue:wght@700&family=Bungee&family=Poppins:wght@700;800&family=Montserrat:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -111,12 +111,108 @@
     <div class="sidebar-content">
       <!-- Style Tab -->
       <div class="tab-panel active" id="tab-style">
+        <!-- Subtitle Mode Section (moved to top) -->
+        <div class="style-section mode-section">
+          <div class="style-section-title">Subtitle Mode</div>
+          <div class="mode-toggle-row">
+            <button class="mode-toggle-btn active" id="mode-dynamic" onclick="setSubtitleMode('dynamic')">
+              <span class="mode-icon">🔤</span>
+              <span class="mode-label">Dynamic</span>
+              <span class="mode-desc">Per-word highlighting</span>
+            </button>
+            <button class="mode-toggle-btn" id="mode-static" onclick="setSubtitleMode('static')">
+              <span class="mode-icon">📝</span>
+              <span class="mode-label">Static</span>
+              <span class="mode-desc">Sentence at a time</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Dynamic Mode Presets Section -->
+        <div class="style-section preset-section dynamic-only" id="dynamic-presets-section">
+          <div class="style-section-title">Dynamic Presets</div>
+          <div class="preset-grid">
+            <button class="preset-btn active" data-preset="vtuber" onclick="applyDynamicPreset('vtuber')">
+              <span class="preset-icon">🔥</span>
+              <span class="preset-name">VTuber Pop</span>
+            </button>
+            <button class="preset-btn" data-preset="neon" onclick="applyDynamicPreset('neon')">
+              <span class="preset-icon neon-text">NEON</span>
+              <span class="preset-name">Neon</span>
+            </button>
+            <button class="preset-btn" data-preset="anime" onclick="applyDynamicPreset('anime')">
+              <span class="preset-icon anime-text">アニメ</span>
+              <span class="preset-name">Anime Bold</span>
+            </button>
+            <button class="preset-btn" data-preset="clean" onclick="applyDynamicPreset('clean')">
+              <span class="preset-icon">Clean</span>
+              <span class="preset-name">Clean</span>
+            </button>
+            <button class="preset-btn" data-preset="retro" onclick="applyDynamicPreset('retro')">
+              <span class="preset-icon retro-text">GAME</span>
+              <span class="preset-name">Retro</span>
+            </button>
+            <button class="preset-btn" data-preset="idol" onclick="applyDynamicPreset('idol')">
+              <span class="preset-icon">✨</span>
+              <span class="preset-name">Idol</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Static Mode Presets Section -->
+        <div class="style-section preset-section static-only" id="static-presets-section" style="display: none;">
+          <div class="style-section-title">Static Presets</div>
+          <div class="preset-grid">
+            <button class="preset-btn static-preset active" data-preset="classic" onclick="applyStaticPreset('classic')">
+              <span class="preset-icon">🎬</span>
+              <span class="preset-name">Classic</span>
+            </button>
+            <button class="preset-btn static-preset" data-preset="cinematic" onclick="applyStaticPreset('cinematic')">
+              <span class="preset-icon">🎥</span>
+              <span class="preset-name">Cinematic</span>
+            </button>
+            <button class="preset-btn static-preset" data-preset="minimal" onclick="applyStaticPreset('minimal')">
+              <span class="preset-icon">—</span>
+              <span class="preset-name">Minimal</span>
+            </button>
+            <button class="preset-btn static-preset" data-preset="neonStatic" onclick="applyStaticPreset('neonStatic')">
+              <span class="preset-icon neon-text">GLOW</span>
+              <span class="preset-name">Neon Glow</span>
+            </button>
+            <button class="preset-btn static-preset" data-preset="retrostatic" onclick="applyStaticPreset('retrostatic')">
+              <span class="preset-icon retro-text">VHS</span>
+              <span class="preset-name">Retro VHS</span>
+            </button>
+            <button class="preset-btn static-preset" data-preset="elegant" onclick="applyStaticPreset('elegant')">
+              <span class="preset-icon">✦</span>
+              <span class="preset-name">Elegant</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Emotion Presets Section (Dynamic only) -->
+        <div class="style-section emotion-section dynamic-only">
+          <div class="style-section-title">Emotion Styles</div>
+          <div class="emotion-grid">
+            <button class="emotion-btn" data-emotion="angry" onclick="applyEmotion('angry')">😡 Angry</button>
+            <button class="emotion-btn" data-emotion="creepy" onclick="applyEmotion('creepy')">👻 Creepy</button>
+            <button class="emotion-btn" data-emotion="shy" onclick="applyEmotion('shy')">😳 Shy</button>
+            <button class="emotion-btn" data-emotion="gloomy" onclick="applyEmotion('gloomy')">😔 Gloomy</button>
+            <button class="emotion-btn" data-emotion="bright" onclick="applyEmotion('bright')">☀️ Bright</button>
+            <button class="emotion-btn" data-emotion="energetic" onclick="applyEmotion('energetic')">⚡ Energetic</button>
+            <button class="emotion-btn" data-emotion="obnoxious" onclick="applyEmotion('obnoxious')">🤪 Obnoxious</button>
+            <button class="emotion-btn" data-emotion="romantic" onclick="applyEmotion('romantic')">💕 Romantic</button>
+          </div>
+          <div class="emotion-info" id="emotion-info">Select words, then click an emotion to apply</div>
+        </div>
+
         <!-- Font Section -->
         <div class="style-section">
           <div class="style-section-title">Font</div>
           <div class="style-row">
             <label>Family</label>
             <select id="ctrl-fontfamily">
+              <option value="Bangers">Bangers (VTuber)</option>
               <option value="Impact">Impact</option>
               <option value="Arial Black">Arial Black</option>
               <option value="Bebas Neue">Bebas Neue</option>
@@ -127,6 +223,10 @@
               <option value="Anton">Anton</option>
               <option value="Poppins">Poppins</option>
               <option value="Lato">Lato</option>
+              <option value="Creepster">Creepster (Horror)</option>
+              <option value="Permanent Marker">Permanent Marker</option>
+              <option value="Comic Neue">Comic Neue</option>
+              <option value="Bungee">Bungee</option>
             </select>
           </div>
           <div class="style-row">
@@ -150,11 +250,15 @@
         <!-- Colors Section -->
         <div class="style-section">
           <div class="style-section-title">Colors</div>
-          <div class="style-row">
+          <div class="style-row dynamic-only" id="highlight-color-row">
             <label>Highlight</label>
             <input type="color" value="#FFD700" id="ctrl-highlight" />
             <label style="margin-left:0.5rem">Normal</label>
             <input type="color" value="#FFFFFF" id="ctrl-textcolor" />
+          </div>
+          <div class="style-row static-only" id="text-color-row" style="display: none;">
+            <label>Text Color</label>
+            <input type="color" value="#FFFFFF" id="ctrl-textcolor-static" />
           </div>
           <div class="style-row">
             <label>Outline</label>
@@ -178,18 +282,69 @@
             <span class="range-val" id="val-shadow">2</span>
           </div>
           <div class="style-row">
-            <label>Scale %</label>
-            <input type="range" min="100" max="150" value="115" id="ctrl-scale" />
-            <span class="range-val" id="val-scale">115</span>
+            <label>Glow</label>
+            <input type="range" min="0" max="20" value="0" id="ctrl-glow" />
+            <span class="range-val" id="val-glow">0</span>
           </div>
           <div class="style-row">
-            <label>Animation</label>
+            <label>Glow Color</label>
+            <input type="color" value="#FFD700" id="ctrl-glowcolor" />
+          </div>
+          <div class="style-row dynamic-only" id="scale-row">
+            <label>Scale %</label>
+            <input type="range" min="100" max="150" value="100" id="ctrl-scale" />
+            <span class="range-val" id="val-scale">100</span>
+          </div>
+        </div>
+        
+        <!-- Dynamic Animation Section -->
+        <div class="style-section dynamic-only" id="animation-section">
+          <div class="style-section-title">Word Animation</div>
+          <div class="style-row">
+            <label>Highlight</label>
             <select id="ctrl-animation">
-              <option value="scale" selected>Scale</option>
+              <option value="color-only" selected>Color Only</option>
+              <option value="scale">Scale</option>
               <option value="bounce">Bounce</option>
-              <option value="fade">Fade</option>
               <option value="none">None</option>
             </select>
+          </div>
+          <div class="style-row">
+            <label>Group Anim</label>
+            <select id="ctrl-groupanimation">
+              <option value="none" selected>None</option>
+              <option value="fade-in">Fade In</option>
+              <option value="slide-up">Slide Up</option>
+              <option value="slide-down">Slide Down</option>
+              <option value="pop-in">Pop In</option>
+              <option value="typewriter">Typewriter</option>
+            </select>
+          </div>
+          <div class="style-row">
+            <label>Anim Speed</label>
+            <input type="range" min="100" max="500" value="200" id="ctrl-animspeed" />
+            <span class="range-val" id="val-animspeed">200</span><span style="font-size:0.7rem;color:var(--text-dim)">ms</span>
+          </div>
+        </div>
+
+        <!-- Static Animation Section -->
+        <div class="style-section static-only" id="static-animation-section" style="display: none;">
+          <div class="style-section-title">Sentence Animation</div>
+          <div class="style-row">
+            <label>Entrance</label>
+            <select id="ctrl-sentenceanimation">
+              <option value="none">None</option>
+              <option value="fade-in" selected>Fade In</option>
+              <option value="slide-up">Slide Up</option>
+              <option value="slide-down">Slide Down</option>
+              <option value="pop-in">Pop In</option>
+              <option value="typewriter">Typewriter</option>
+            </select>
+          </div>
+          <div class="style-row">
+            <label>Anim Speed</label>
+            <input type="range" min="100" max="500" value="300" id="ctrl-staticanimspeed" />
+            <span class="range-val" id="val-staticanimspeed">300</span><span style="font-size:0.7rem;color:var(--text-dim)">ms</span>
           </div>
         </div>
 

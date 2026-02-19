@@ -84,6 +84,7 @@ class StyleConfig(BaseModel):
     # Grouping
     words_per_group: int = 4
     use_custom_groups: bool = False  # If True, use word_groups instead of auto-grouping
+    dynamic_mode: bool = True  # True = per-word highlighting, False = static sentence
     
     # Font settings
     font_name: str = "Impact"
@@ -100,7 +101,9 @@ class StyleConfig(BaseModel):
     # Effects
     outline_width: int = 4
     shadow_depth: int = 2
-    scale_highlight: int = 115
+    glow_strength: int = 0
+    glow_color: str = "FFD700"
+    scale_highlight: int = 100
     
     # Position
     position: str = "bottom"  # top, center, bottom
@@ -112,7 +115,9 @@ class StyleConfig(BaseModel):
     word_gap: int = 0         # Extra hard spaces between words
 
     # Animation
-    animation: str = "scale"  # none, scale, fade, bounce
+    animation: str = "color-only"  # none, scale, color-only, bounce
+    group_animation: str = "none"  # none, fade-in, slide-up, slide-down, pop-in, typewriter
+    anim_speed: int = 200  # Animation duration in ms
     
     # Text transform
     uppercase: bool = True
@@ -120,6 +125,11 @@ class StyleConfig(BaseModel):
 
 class TranscribeExistingRequest(BaseModel):
     filename: str
+
+
+class SaveStyleRequest(BaseModel):
+    video_filename: str
+    style: StyleConfig
 
 
 class RenderRequest(BaseModel):
@@ -244,6 +254,7 @@ def _do_render(render_id: str, req: RenderRequest):
             words_per_group=req.style.words_per_group,
             custom_groups=groups_dicts,
             use_custom_groups=req.style.use_custom_groups,
+            dynamic_mode=req.style.dynamic_mode,
             font_name=req.style.font_name,
             font_size=req.style.font_size,
             bold=req.style.bold,
@@ -254,6 +265,8 @@ def _do_render(render_id: str, req: RenderRequest):
             shadow_color=req.style.shadow_color,
             outline_width=req.style.outline_width,
             shadow_depth=req.style.shadow_depth,
+            glow_strength=req.style.glow_strength,
+            glow_color=req.style.glow_color,
             position=req.style.position,
             margin_v=req.style.margin_v,
             margin_h=req.style.margin_h,
@@ -261,6 +274,8 @@ def _do_render(render_id: str, req: RenderRequest):
             word_gap=req.style.word_gap,
             scale_highlight=req.style.scale_highlight,
             animation=req.style.animation,
+            group_animation=req.style.group_animation,
+            anim_speed=req.style.anim_speed,
             uppercase=req.style.uppercase,
         )
 
@@ -331,17 +346,21 @@ async def list_rendered():
 
 @app.get("/uploads")
 async def list_uploads():
-    """List all uploaded video/audio files with their transcription status."""
+    """List all uploaded video/audio files with their transcription and style status."""
     files = []
     for f in UPLOAD_DIR.iterdir():
         if f.is_file() and f.suffix.lower() in ALLOWED_EXTENSIONS:
             transcription_json = OUTPUT_DIR / (f.stem + "_transcription.json")
+            style_json = OUTPUT_DIR / (f.stem + "_style.json")
             has_transcription = transcription_json.exists()
+            has_style = style_json.exists()
             files.append({
                 "filename": f.name,
                 "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
                 "has_transcription": has_transcription,
                 "transcription_file": (f.stem + "_transcription.json") if has_transcription else None,
+                "has_style": has_style,
+                "style_file": (f.stem + "_style.json") if has_style else None,
             })
     files.sort(key=lambda x: x["filename"])
     return {"files": files}
@@ -367,6 +386,26 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
     return result
+
+
+@app.post("/save-style")
+async def save_style_endpoint(payload: SaveStyleRequest):
+    """Save style settings for a video file."""
+    video_filename = payload.video_filename.strip()
+    if not video_filename:
+        raise HTTPException(status_code=400, detail="video_filename is required")
+    
+    # Derive stem from video filename
+    video_stem = Path(video_filename).stem
+    style_path = OUTPUT_DIR / f"{video_stem}_style.json"
+    
+    try:
+        with open(style_path, "w", encoding="utf-8") as f:
+            json.dump(payload.style.model_dump(), f, indent=2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save style: {e}")
+    
+    return {"status": "ok", "style_file": f"{video_stem}_style.json"}
 
 
 # ─── Outputs (JSON) ─────────────────────────────────────────

@@ -88,11 +88,90 @@ def get_animation_tags(animation: str, is_highlight: bool, scale: int) -> tuple[
     elif animation == "bounce":
         # Bounce effect using transform - move up slightly
         return f"\\fscx{scale}\\fscy{scale}\\fry-5", ""
-    elif animation == "fade":
-        # Fade doesn't change visually much in ASS, use subtle effect
-        return f"\\fscx{scale}\\fscy{scale}", ""
+    elif animation == "color-only":
+        # Just color change, no scaling
+        return "", ""
     else:  # "none"
         return "", ""
+
+
+def calculate_word_positions(
+    words_text: list,
+    font_size: int,
+    video_width: int,
+    video_height: int,
+    margin_h: int,
+    margin_v: int,
+    position: str,
+    word_gap: int,
+) -> dict:
+    """
+    Calculate the absolute center (x, y) for each word in the group.
+
+    Words are packed left-to-right into lines. Each word gets a FIXED center
+    coordinate regardless of which word is currently highlighted, so the scale
+    animation never shifts neighbouring words.
+
+    Returns: dict mapping word_index -> (center_x, center_y)
+    """
+    # Approximate px width per uppercase character for Impact-style bold fonts.
+    # Bold Impact uppercase averages ~0.72× font size; using a generous estimate
+    # prevents individual words from overflowing the video edge (which causes
+    # libass to wrap mid-word, splitting e.g. "MISSING" into "MISSIN" + "G").
+    char_width = font_size * 0.72
+    # Space between words (one normal space + optional extra hard-spaces)
+    gap_width = char_width * (1 + word_gap * 0.6)
+    available_width = video_width - margin_h * 2
+
+    # --- pack words into lines (no highlight scale — layout is fixed) ---
+    lines: list[list[tuple[int, float]]] = []  # each line = [(word_idx, word_px_width)]
+    current_line: list[tuple[int, float]] = []
+    current_width = 0.0
+
+    for i, text in enumerate(words_text):
+        w = len(text) * char_width
+        needed = w if not current_line else gap_width + w
+        if current_line and current_width + needed > available_width:
+            lines.append(current_line)
+            current_line = [(i, w)]
+            current_width = w
+        else:
+            current_line.append((i, w))
+            current_width += needed
+
+    if current_line:
+        lines.append(current_line)
+
+    # --- calculate Y for each line ---
+    line_height = font_size * 1.25  # vertical spacing between lines
+    total_block_height = len(lines) * line_height
+
+    if position == "bottom":
+        # bottom of last line sits margin_v above the bottom edge
+        block_top_y = video_height - margin_v - total_block_height
+    elif position == "top":
+        block_top_y = margin_v
+    else:  # center
+        block_top_y = (video_height - total_block_height) / 2
+
+    # --- assign center (x, y) per word ---
+    word_positions: dict[int, tuple[int, int]] = {}
+    for line_idx, line in enumerate(lines):
+        # center y of this line  (\an5 anchor = bounding-box center)
+        line_center_y = block_top_y + line_idx * line_height + line_height / 2
+
+        # total width of this line
+        line_word_widths = [w for _, w in line]
+        total_line_w = sum(line_word_widths) + gap_width * (len(line) - 1)
+        x_start = (video_width - total_line_w) / 2  # left edge of first word
+
+        cursor_x = x_start
+        for word_idx, w in line:
+            center_x = cursor_x + w / 2
+            word_positions[word_idx] = (round(center_x), round(line_center_y))
+            cursor_x += w + gap_width
+
+    return word_positions
 
 
 def generate_ass(
@@ -102,6 +181,7 @@ def generate_ass(
     words_per_group: int = 4,
     custom_groups: list = None,
     use_custom_groups: bool = False,
+    dynamic_mode: bool = True,
     font_name: str = "Impact",
     font_size: int = 80,
     bold: bool = True,
@@ -112,53 +192,45 @@ def generate_ass(
     shadow_color: str = "000000",
     outline_width: int = 4,
     shadow_depth: int = 2,
+    glow_strength: int = 0,
+    glow_color: str = "FFD700",
     position: str = "bottom",
     margin_v: int = 60,
     margin_h: int = 10,
     letter_spacing: int = 0,
     word_gap: int = 0,
-    scale_highlight: int = 115,
-    animation: str = "scale",
+    scale_highlight: int = 100,
+    animation: str = "color-only",
+    group_animation: str = "none",
+    anim_speed: int = 200,
     uppercase: bool = True,
 ) -> str:
     """
-    Generate ASS subtitle content with word-level highlighting.
-
-    For each word group, generates multiple dialogue events — one per word —
-    where the active word is rendered in the highlight color and scaled up,
-    while other words in the group are rendered in the normal color.
+    Generate ASS subtitle content.
     
-    Supports:
-    - Custom word groups with user-defined timing
-    - Per-word style overrides
-    - Multiple animation types
+    If dynamic_mode is True: per-word highlighting with animations.
+    If dynamic_mode is False: static sentence display (whole group shown at once).
     """
     if not words:
         return ""
-
-    # ASS alignment: 1-3 bottom, 4-6 middle, 7-9 top (centered = 2, 5, 8)
-    alignment_map = {"bottom": 2, "center": 5, "top": 8}
-    alignment = alignment_map.get(position, 2)
-    
-    # Adjust margin for center position
-    actual_margin_v = 0 if position == "center" else margin_v
 
     highlight_ass = rgb_to_ass_color(highlight_color)
     normal_ass = rgb_to_ass_color(normal_color)
     outline_ass = rgb_to_ass_color(outline_color)
     shadow_ass = rgb_to_ass_color(shadow_color) if shadow_color else "&H80000000&"
-    
+
     # Bold/Italic flags for ASS: -1 = true, 0 = false
     bold_flag = -1 if bold else 0
     italic_flag = -1 if italic else 0
 
+    # Style uses an2 (bottom-center) as fallback; events override with \an5\pos
     header = (
         "[Script Info]\n"
         "Title: Dynamic Captions\n"
         "ScriptType: v4.00+\n"
         f"PlayResX: {video_width}\n"
         f"PlayResY: {video_height}\n"
-        "WrapStyle: 0\n"
+        "WrapStyle: 2\n"
         "ScaledBorderAndShadow: yes\n"
         "\n"
         "[V4+ Styles]\n"
@@ -168,7 +240,7 @@ def generate_ass(
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_name},{font_size},{normal_ass},&H000000FF,"
         f"{outline_ass},{shadow_ass},{bold_flag},{italic_flag},0,0,100,100,{letter_spacing},0,1,"
-        f"{outline_width},{shadow_depth},{alignment},{margin_h},{margin_h},{actual_margin_v},1\n"
+        f"{outline_width},{shadow_depth},5,0,0,0,1\n"
         "\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, "
@@ -176,65 +248,165 @@ def generate_ass(
     )
 
     events = []
-    
+
     # Build groups (either custom or automatic)
     if use_custom_groups and custom_groups:
         groups = build_custom_groups(words, custom_groups)
     else:
         groups = group_words(words, words_per_group)
 
+    # ========== STATIC MODE: Simple sentence subtitles ==========
+    if not dynamic_mode:
+        for group in groups:
+            group_words_list = group["words"]
+            group_start = group["start"]
+            group_end = group["end"]
+
+            # Combine all words into one subtitle line
+            sentence = " ".join(
+                w["text"].upper() if uppercase else w["text"]
+                for w in group_words_list
+            )
+
+            start_str = format_ass_time(group_start)
+            end_str = format_ass_time(group_end)
+
+            # Build simple tags - use normal_color for static mode
+            normal_ass = rgb_to_ass_color(normal_color)
+            tags = [f"\\c{normal_ass}"]
+
+            # Add glow effect if enabled
+            if glow_strength > 0:
+                glow_color_ass = rgb_to_ass_color(glow_color)
+                tags.append(f"\\blur{glow_strength // 2}")
+                tags.append(f"\\4c{glow_color_ass}")
+
+            # Add group animation
+            if group_animation == "fade-in":
+                tags.append(f"\\fad({anim_speed},0)")
+            elif group_animation == "pop-in":
+                tags.append(f"\\fscx0\\fscy0\\t(0,{anim_speed},\\fscx100\\fscy100)")
+
+            tag_str = "".join(tags)
+            events.append(
+                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
+                f"{{{tag_str}}}{sentence}"
+            )
+
+        return header + "\n".join(events) + "\n"
+
+    # ========== DYNAMIC MODE: Per-word highlighting ==========
     for group in groups:
         group_words_list = group["words"]
         group_start = group["start"]
         group_end = group["end"]
 
-        for i, word in enumerate(group_words_list):
-            # Word highlight timing (based on original word timestamps)
-            word_start = word["start"]
-            
-            # End at next word's start (continuous display), or word's own end
+        # --- Calculate fixed absolute center (x, y) for every word in the group ---
+        words_text = [
+            w["text"].upper() if uppercase else w["text"]
+            for w in group_words_list
+        ]
+        word_positions = calculate_word_positions(
+            words_text=words_text,
+            font_size=font_size,
+            video_width=video_width,
+            video_height=video_height,
+            margin_h=margin_h,
+            margin_v=margin_v,
+            position=position,
+            word_gap=word_gap,
+        )
+
+        # --- Calculate group animation tags ---
+        group_anim_duration = anim_speed  # milliseconds
+
+        def get_group_anim_tags(group_animation: str, cx: int, cy: int, is_first_word: bool) -> str:
+            """Generate ASS tags for group-level animations."""
+            if group_animation == "none":
+                return ""
+            elif group_animation == "fade-in":
+                return f"\\fad({group_anim_duration},0)"
+            elif group_animation == "slide-up":
+                offset = font_size // 2
+                return f"\\move({cx},{cy + offset},{cx},{cy},0,{group_anim_duration})"
+            elif group_animation == "slide-down":
+                offset = font_size // 2
+                return f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
+            elif group_animation == "pop-in":
+                return f"\\fscx0\\fscy0\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+            elif group_animation == "typewriter":
+                # For typewriter, we don't animate the group but per-word reveal
+                return f"\\fad({50},0)"
+            return ""
+
+        # --- For each highlight state (one per word), emit one Dialogue per word ---
+        for i, active_word in enumerate(group_words_list):
+            # Time window: this word is the highlighted one
+            word_start = active_word["start"]
             if i + 1 < len(group_words_list):
                 word_end = group_words_list[i + 1]["start"]
             else:
-                word_end = word["end"]
+                word_end = active_word["end"]
 
-            # Ensure positive duration
             if word_end <= word_start:
                 word_end = word_start + 0.15
-                
-            # Clamp to group bounds
+
             word_start = max(word_start, group_start)
             word_end = min(word_end, group_end)
 
-            # Build text line with ASS override tags for highlighting
-            parts = []
+            start_str = format_ass_time(word_start)
+            end_str = format_ass_time(word_end)
+
+            # Emit one Dialogue event per word in the group (all visible at the same time)
             for j, w in enumerate(group_words_list):
                 text = w["text"].upper() if uppercase else w["text"]
                 is_active = (j == i)
-                
-                # Get per-word style overrides
+
+                cx, cy = word_positions.get(j, (video_width // 2, video_height // 2))
+
+                # Per-word style overrides
                 word_style = w.get("style") or {}
-                
-                # Determine colors for this word
+
                 if is_active:
                     word_color = word_style.get("highlight_color") or highlight_color
                 else:
                     word_color = word_style.get("normal_color") or normal_color
-                
+
                 word_color_ass = rgb_to_ass_color(word_color)
-                
-                # Per-word font size
-                word_font_size = word_style.get("font_size")
-                word_font_name = word_style.get("font_name")
-                word_bold = word_style.get("bold")
-                word_italic = word_style.get("italic")
-                word_outline_color = word_style.get("outline_color")
-                word_outline_width = word_style.get("outline_width")
-                word_scale = word_style.get("scale_highlight") or scale_highlight
-                
-                # Build override tags
-                tags = [f"\\c{word_color_ass}"]
-                
+
+                word_font_size   = word_style.get("font_size")
+                word_font_name   = word_style.get("font_name")
+                word_bold        = word_style.get("bold")
+                word_italic      = word_style.get("italic")
+                word_outline_col = word_style.get("outline_color")
+                word_outline_w   = word_style.get("outline_width")
+                word_scale       = word_style.get("scale_highlight") or scale_highlight
+
+                # Build base tags
+                # For group animations that use \move, we skip the \pos tag
+                if group_animation in ("slide-up", "slide-down") and i == 0:
+                    # Use \move for the first highlight window only
+                    group_anim_tag = get_group_anim_tags(group_animation, cx, cy, j == 0)
+                    if group_anim_tag and "\\move" in group_anim_tag:
+                        tags = [f"\\q2\\an5{group_anim_tag}\\c{word_color_ass}"]
+                    else:
+                        tags = [f"\\q2\\an5\\pos({cx},{cy})\\c{word_color_ass}"]
+                else:
+                    tags = [f"\\q2\\an5\\pos({cx},{cy})\\c{word_color_ass}"]
+
+                # Add glow effect (using blur in ASS)
+                if glow_strength > 0:
+                    glow_color_ass = rgb_to_ass_color(glow_color)
+                    # Use shadow color for glow and blur for the effect
+                    tags.append(f"\\blur{glow_strength // 2}")
+                    tags.append(f"\\4c{glow_color_ass}")
+
+                # Add group animation (fade, pop) if on first highlight window
+                if i == 0:
+                    group_anim_tag = get_group_anim_tags(group_animation, cx, cy, j == 0)
+                    if group_anim_tag and "\\move" not in group_anim_tag:
+                        tags.append(group_anim_tag)
+
                 if word_font_size is not None:
                     tags.append(f"\\fs{word_font_size}")
                 if word_font_name is not None:
@@ -243,29 +415,22 @@ def generate_ass(
                     tags.append(f"\\b{1 if word_bold else 0}")
                 if word_italic is not None:
                     tags.append(f"\\i{1 if word_italic else 0}")
-                if word_outline_color is not None:
-                    tags.append(f"\\3c{rgb_to_ass_color(word_outline_color)}")
-                if word_outline_width is not None:
-                    tags.append(f"\\bord{word_outline_width}")
-                
-                # Animation for highlighted word
+                if word_outline_col is not None:
+                    tags.append(f"\\3c{rgb_to_ass_color(word_outline_col)}")
+                if word_outline_w is not None:
+                    tags.append(f"\\bord{word_outline_w}")
+
                 if is_active:
-                    anim_start, anim_end = get_animation_tags(animation, True, word_scale)
+                    anim_start, _ = get_animation_tags(animation, True, word_scale)
                     if anim_start:
                         tags.append(anim_start)
-                
+
                 tag_str = "".join(tags)
-                parts.append(f"{{{tag_str}}}{text}{{\\r}}")
+                events.append(
+                    f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
+                    f"{{{tag_str}}}{text}"
+                )
 
-            # Join words with optional extra hard spaces for word gap
-            hard_spaces = '\\h' * word_gap
-            line_text = (' ' + hard_spaces).join(parts)
-            start_str = format_ass_time(word_start)
-            end_str = format_ass_time(word_end)
-
-            events.append(
-                f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{line_text}"
-            )
 
     return header + "\n".join(events) + "\n"
 
