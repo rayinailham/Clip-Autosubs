@@ -3,7 +3,9 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  min-height: 250px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 .transcript-header {
   padding: 0.6rem 1rem;
