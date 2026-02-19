@@ -129,16 +129,42 @@
   box-sizing: border-box;
 }
 
-/* Entrance animations for static subtitle mode */
-@keyframes subtitleFadeIn  { from { opacity: 0; }             to { opacity: 1; } }
-@keyframes subtitleSlideUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes subtitleSlideDown { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes subtitlePopIn   { from { opacity: 0; transform: scale(0.5); } to { opacity: 1; transform: scale(1); } }
+/* Entrance animations for subtitle modes */
+@keyframes subtitleFadeIn    { from { opacity: 0; }                                                               to { opacity: 1; } }
+@keyframes subtitleSlideUp   { from { opacity: 0; transform: translateY(30px); }                                  to { opacity: 1; transform: translateY(0); } }
+@keyframes subtitleSlideDown { from { opacity: 0; transform: translateY(-30px); }                                 to { opacity: 1; transform: translateY(0); } }
+@keyframes subtitleSlideLeft { from { opacity: 0; transform: translateX(40px); }                                  to { opacity: 1; transform: translateX(0); } }
+@keyframes subtitleSlideRight{ from { opacity: 0; transform: translateX(-40px); }                                 to { opacity: 1; transform: translateX(0); } }
+@keyframes subtitlePopIn     { from { opacity: 0; transform: scale(0.5); }                                        to { opacity: 1; transform: scale(1); } }
+@keyframes subtitleBounce    {
+  0%   { opacity: 0; transform: translateY(-55px) scale(0.75); }
+  60%  { opacity: 1; transform: translateY(8px)  scale(1.06); }
+  80%  { transform: translateY(-4px) scale(0.98); }
+  100% { transform: translateY(0)   scale(1); }
+}
+@keyframes subtitleBlurIn    { from { opacity: 0; filter: blur(18px); }           to { opacity: 1; filter: blur(0); } }
+@keyframes subtitleStretch   {
+  from { opacity: 0; transform: scaleX(4) scaleY(0.15); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes subtitleZoomDrop  {
+  0%   { opacity: 0; transform: scale(2.4) translateY(-20px); }
+  65%  { opacity: 1; transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+@keyframes subtitleFlipIn    { from { opacity: 0; transform: perspective(500px) rotateX(-80deg); } to { opacity: 1; transform: perspective(500px) rotateX(0deg); } }
 
-.subtitle-anim-fade-in   { animation: subtitleFadeIn   var(--anim-speed, 300ms) ease-out both; }
-.subtitle-anim-slide-up  { animation: subtitleSlideUp  var(--anim-speed, 300ms) ease-out both; }
-.subtitle-anim-slide-down{ animation: subtitleSlideDown var(--anim-speed, 300ms) ease-out both; }
-.subtitle-anim-pop-in    { animation: subtitlePopIn    var(--anim-speed, 300ms) cubic-bezier(0.34,1.56,0.64,1) both; }
+.subtitle-anim-fade-in    { animation: subtitleFadeIn    var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-up   { animation: subtitleSlideUp   var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-down { animation: subtitleSlideDown var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-left { animation: subtitleSlideLeft var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-slide-right{ animation: subtitleSlideRight var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-pop-in     { animation: subtitlePopIn     var(--anim-speed, 300ms) cubic-bezier(0.34,1.56,0.64,1) both; }
+.subtitle-anim-bounce     { animation: subtitleBounce    var(--anim-speed, 300ms) cubic-bezier(0.22,1,0.36,1) both; }
+.subtitle-anim-blur-in    { animation: subtitleBlurIn    var(--anim-speed, 300ms) ease-out both; }
+.subtitle-anim-stretch    { animation: subtitleStretch   var(--anim-speed, 300ms) cubic-bezier(0.34,1.2,0.64,1) both; }
+.subtitle-anim-zoom-drop  { animation: subtitleZoomDrop  var(--anim-speed, 300ms) cubic-bezier(0.34,1.3,0.64,1) both; }
+.subtitle-anim-flip-in    { animation: subtitleFlipIn    var(--anim-speed, 300ms) ease-out both; }
 .subtitle-overlay.pos-bottom { align-items: flex-end; }
 .subtitle-overlay.pos-center { align-items: center; }
 .subtitle-overlay.pos-top    { align-items: flex-start; }

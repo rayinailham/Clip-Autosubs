@@ -13,21 +13,33 @@ export default {
     const emotionWarning = ref(false);
 
     // Dynamic preset info for template
+    const dynamicIconMap = {
+      vtuber:    { icon: '🔥', iconText: null,    iconClass: '' },
+      neon:      { icon: '',   iconText: 'RAVE',  iconClass: 'neon-text' },
+      anime:     { icon: '',   iconText: 'アニメ', iconClass: 'anime-text' },
+      clean:     { icon: '',   iconText: 'PRO',   iconClass: '' },
+      retro:     { icon: '',   iconText: 'GAME',  iconClass: 'retro-text' },
+      idol:      { icon: '💗', iconText: null,    iconClass: '' },
+      newsflash: { icon: '📰', iconText: null,    iconClass: '' },
+      cybergold: { icon: '',   iconText: 'GOLD',  iconClass: 'neon-text' },
+      horror:    { icon: '💀', iconText: null,    iconClass: '' },
+    };
     const dynamicPresetList = Object.entries(DYNAMIC_PRESETS).map(([key, p]) => ({
       key,
       name: p.name,
-      icon: key === 'vtuber' ? '🔥' : key === 'neon' ? '' : key === 'anime' ? '' : key === 'clean' ? '' : key === 'retro' ? '' : '✨',
-      iconText: key === 'neon' ? 'NEON' : key === 'anime' ? 'アニメ' : key === 'clean' ? 'Clean' : key === 'retro' ? 'GAME' : null,
-      iconClass: key === 'neon' ? 'neon-text' : key === 'anime' ? 'anime-text' : key === 'retro' ? 'retro-text' : '',
+      ...(dynamicIconMap[key] || { icon: '✨', iconText: null, iconClass: '' }),
     }));
 
     const staticPresetList = [
-      { key: 'classic', icon: '🎬', name: 'Classic' },
-      { key: 'cinematic', icon: '🎥', name: 'Cinematic' },
-      { key: 'minimal', icon: '—', name: 'Minimal' },
-      { key: 'neonStatic', icon: '', iconText: 'GLOW', iconClass: 'neon-text', name: 'Neon Glow' },
-      { key: 'retrostatic', icon: '', iconText: 'VHS', iconClass: 'retro-text', name: 'Retro VHS' },
-      { key: 'elegant', icon: '✦', name: 'Elegant' },
+      { key: 'classic',    icon: '🎬', name: 'Classic' },
+      { key: 'cinematic',  icon: '🎥', name: 'Cinematic' },
+      { key: 'minimal',    icon: '—',  name: 'Minimal' },
+      { key: 'neonStatic', icon: '',   iconText: 'GLOW', iconClass: 'neon-text', name: 'Neon Glow' },
+      { key: 'retrostatic',icon: '',   iconText: 'VHS',  iconClass: 'retro-text', name: 'Retro VHS' },
+      { key: 'elegant',    icon: '✦',  name: 'Elegant' },
+      { key: 'goldenhour', icon: '🌅', name: 'Golden Hour' },
+      { key: 'icecold',    icon: '🧊', name: 'Ice Cold' },
+      { key: 'boldstrike', icon: '⚡', name: 'Bold Strike' },
     ];
 
     const emotionList = [
@@ -215,7 +227,7 @@ export default {
       <div class="style-row">
         <label>Size</label>
         <input type="range" min="20" max="200" v-model.number="store.style.fontSize" />
-        <span class="range-val">{{ store.style.fontSize }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.fontSize" min="20" max="200" />
       </div>
       <div class="style-row">
         <label>Bold</label>
@@ -257,17 +269,17 @@ export default {
       <div class="style-row">
         <label>Outline</label>
         <input type="range" min="0" max="12" v-model.number="store.style.outline" />
-        <span class="range-val">{{ store.style.outline }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.outline" min="0" max="12" />
       </div>
       <div class="style-row">
         <label>Shadow</label>
         <input type="range" min="0" max="10" v-model.number="store.style.shadow" />
-        <span class="range-val">{{ store.style.shadow }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.shadow" min="0" max="10" />
       </div>
       <div class="style-row">
         <label>Glow</label>
         <input type="range" min="0" max="20" v-model.number="store.style.glow" />
-        <span class="range-val">{{ store.style.glow }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.glow" min="0" max="20" />
       </div>
       <div class="style-row">
         <label>Glow Color</label>
@@ -276,7 +288,7 @@ export default {
       <div v-if="store.useDynamicMode" class="style-row">
         <label>Scale %</label>
         <input type="range" min="100" max="150" v-model.number="store.style.scale" />
-        <span class="range-val">{{ store.style.scale }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.scale" min="100" max="150" />
       </div>
     </div>
 
@@ -308,12 +320,13 @@ export default {
           <option value="zoom-drop">Zoom Drop</option>
           <option value="flip-in">Flip In</option>
           <option value="typewriter">Typewriter</option>
+          <option value="cascade">Cascade Pop</option>
         </select>
       </div>
       <div class="style-row">
         <label>Anim Speed</label>
         <input type="range" min="100" max="500" v-model.number="store.style.animSpeed" />
-        <span class="range-val">{{ store.style.animSpeed }}</span><span style="font-size:0.7rem;color:var(--text-dim)">ms</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.animSpeed" min="100" max="500" /><span class="range-unit">ms</span>
       </div>
     </div>
 
@@ -342,7 +355,7 @@ export default {
       <div class="style-row">
         <label>Anim Speed</label>
         <input type="range" min="100" max="500" v-model.number="store.style.staticAnimSpeed" />
-        <span class="range-val">{{ store.style.staticAnimSpeed }}</span><span style="font-size:0.7rem;color:var(--text-dim)">ms</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.staticAnimSpeed" min="100" max="500" /><span class="range-unit">ms</span>
       </div>
     </div>
 
@@ -352,12 +365,12 @@ export default {
       <div class="style-row">
         <label>Letter Spc</label>
         <input type="range" min="0" max="20" v-model.number="store.style.letterSpacing" />
-        <span class="range-val">{{ store.style.letterSpacing }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.letterSpacing" min="0" max="20" />
       </div>
       <div class="style-row">
         <label>Word Gap</label>
         <input type="range" min="0" max="8" v-model.number="store.style.wordGap" />
-        <span class="range-val">{{ store.style.wordGap }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.wordGap" min="0" max="8" />
       </div>
     </div>
 
@@ -375,12 +388,12 @@ export default {
       <div class="style-row">
         <label>Margin V</label>
         <input type="range" min="0" max="200" v-model.number="store.style.marginV" />
-        <span class="range-val">{{ store.style.marginV }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.marginV" min="0" max="200" />
       </div>
       <div class="style-row">
         <label>Margin H</label>
         <input type="range" min="0" max="200" v-model.number="store.style.marginH" />
-        <span class="range-val">{{ store.style.marginH }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.marginH" min="0" max="200" />
       </div>
     </div>
 

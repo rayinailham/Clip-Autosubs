@@ -147,6 +147,23 @@
 .style-row select                 { flex: 1; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 5px 8px; font-size: 0.75rem; }
 .style-row input[type="checkbox"] { accent-color: var(--accent); }
 .range-val { color: var(--text); font-weight: 600; min-width: 28px; text-align: right; font-size: 0.75rem; flex-shrink: 0; }
+.range-val-input {
+  width: 44px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 5px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: right;
+  flex-shrink: 0;
+  -moz-appearance: textfield;
+}
+.range-val-input::-webkit-outer-spin-button,
+.range-val-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.range-val-input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent); }
+.range-unit { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; }
 
 /* ── Per-Word Style Panel ─────────────────────── */
 .word-style-panel {

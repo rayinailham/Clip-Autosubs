@@ -8,6 +8,7 @@ export default {
     const videoEl = ref(null);
     let timeUpdateHandler = null;
     let lastGroupKey = null;  // track group changes for entrance animations
+    let groupEntryTime = 0;   // timestamp of last group change
 
     function onTimeUpdate() {
       if (!videoEl.value) return;
@@ -138,19 +139,65 @@ export default {
       const fontStyle = italic ? 'italic' : 'normal';
       const fontWeight = bold ? 'bold' : 'normal';
 
+      // ── All animation class names so we can clean them off the container ──
+      const ALL_ANIM_CLASSES = [
+        'subtitle-anim-fade-in','subtitle-anim-slide-up','subtitle-anim-slide-down',
+        'subtitle-anim-slide-left','subtitle-anim-slide-right','subtitle-anim-pop-in',
+        'subtitle-anim-bounce','subtitle-anim-blur-in','subtitle-anim-stretch',
+        'subtitle-anim-zoom-drop','subtitle-anim-flip-in',
+      ];
+
       // Static mode
       if (!store.useDynamicMode) {
         const groupKey = activeGroup.start + '_' + activeGroup.end;
         if (groupKey !== lastGroupKey) {
           lastGroupKey = groupKey;
-          const sentence = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text).join(' ');
+          const words = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
+          const sentence = words.join(' ');
           const animName = store.style.sentenceAnimation || 'none';
-          const animSpeed = (store.style.staticAnimSpeed || 300) + 'ms';
-          const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
-          preview.innerHTML = `<span class="subtitle-word${animClass}" style="color:${textColor}; --anim-speed:${animSpeed}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}">${sentence}</span>`;
+          const animSpeedMs = store.style.staticAnimSpeed || 300;
+          const animSpeed = animSpeedMs + 'ms';
+          const baseStyle = `color:${textColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}`;
+
+          if (animName === 'typewriter') {
+            // Reveal each word with a fast fade, staggered across the animSpeed window
+            const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
+            preview.innerHTML = words.map((word, i) =>
+              `<span class="subtitle-word subtitle-anim-fade-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
+            ).join(' ');
+          } else if (animName === 'cascade') {
+            // Staggered pop-in per word
+            const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
+            preview.innerHTML = words.map((word, i) =>
+              `<span class="subtitle-word subtitle-anim-pop-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
+            ).join(' ');
+          } else {
+            const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
+            preview.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
+          }
         }
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
         return;
+      }
+
+      // Dynamic mode — track group changes for entrance animations
+      const dynamicGroupKey = activeGroup.start + '_' + activeGroup.end;
+      const isNewGroup = dynamicGroupKey !== lastGroupKey;
+      if (isNewGroup) {
+        lastGroupKey = dynamicGroupKey;
+        groupEntryTime = performance.now();
+        const rawAnim = store.style.groupAnimation || 'none';
+        // typewriter / cascade don't work per-span in dynamic mode since innerHTML
+        // is rebuilt every frame — map them to sensible container equivalents
+        const groupAnim = rawAnim === 'typewriter' ? 'slide-up'
+                        : rawAnim === 'cascade'    ? 'pop-in'
+                        : rawAnim;
+        ALL_ANIM_CLASSES.forEach(c => preview.classList.remove(c));
+        void preview.offsetWidth; // force reflow to restart animation
+        if (groupAnim !== 'none') {
+          preview.style.setProperty('--anim-speed', (store.style.animSpeed || 200) + 'ms');
+          preview.classList.add('subtitle-anim-' + groupAnim);
+        }
       }
 
       // Dynamic mode

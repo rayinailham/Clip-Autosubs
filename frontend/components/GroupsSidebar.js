@@ -115,7 +115,7 @@ export default {
       <div class="groups-wpg-row">
         <label class="groups-wpg-label">Words / group</label>
         <input type="range" min="1" max="12" v-model.number="store.style.wpg" @input="onWpgChange" class="groups-wpg-slider" />
-        <span class="range-val">{{ store.style.wpg }}</span>
+        <input type="number" class="range-val-input" v-model.number="store.style.wpg" min="1" max="12" @change="onWpgChange" />
       </div>
       <button class="btn btn-outline btn-sm" @click="resetToAuto" title="Re-split all groups evenly by Words/group">↺ Reset</button>
     </div>

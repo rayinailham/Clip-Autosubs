@@ -1030,6 +1030,23 @@
       text-align: right;
       font-size: 0.75rem;
     }
+    .range-val-input {
+      width: 44px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      padding: 3px 5px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-align: right;
+      flex-shrink: 0;
+      -moz-appearance: textfield;
+    }
+    .range-val-input::-webkit-outer-spin-button,
+    .range-val-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .range-val-input:focus { border-color: var(--accent); outline: none; }
+    .range-unit { font-size: 0.7rem; color: var(--text-dim); flex-shrink: 0; }
     
     /* Word Style Panel */
     .word-style-panel {
