@@ -1,6 +1,6 @@
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import store from '../store.js';
-import { uploadVideoOnly, startReframeJob, pollReframeStatus } from '../api.js';
+import { uploadVideoOnly, startReframeJob, pollReframeStatus, fetchUploads, videoURL } from '../api.js';
 
 export default {
   name: 'ReframeView',
@@ -8,6 +8,24 @@ export default {
     // ── Upload step ─────────────────────────────────────────
     const uploading = ref(false);
     const dragover = ref(false);
+    const uploads = ref([]);
+    const uploadsLoading = ref(false);
+
+    async function loadPreviousUploads() {
+      uploadsLoading.value = true;
+      try {
+        const data = await fetchUploads();
+        uploads.value = data.files || [];
+      } catch {
+        uploads.value = [];
+      }
+      uploadsLoading.value = false;
+    }
+
+    function useExistingUpload(filename) {
+      store.reframe.videoFilename = filename;
+      store.reframe.step = 'editor';
+    }
 
     async function handleFile(file) {
       if (!file) return;
@@ -81,6 +99,29 @@ export default {
       };
     }
 
+    // ── Mode selection ───────────────────────────────────────
+    const MODE_LABELS = {
+      zoomed:   'Zoomed',
+      blur_bg:  'Blurred Background',
+      black_bg: 'Black Background',
+      vtuber:   'VTuber Split-screen',
+    };
+
+    function setMode(mode) {
+      store.reframe.shortsMode = mode;
+      store.reframe.step = 'upload';
+    }
+
+    function goBack() {
+      if (store.reframe.step === 'editor') {
+        store.reframe.step = 'upload';
+      } else if (store.reframe.step === 'upload') {
+        store.reframe.step = 'mode';
+      } else {
+        goHome();
+      }
+    }
+
     // ── Render ──────────────────────────────────────────────
     const rr = computed(() => store.reframe.render);
     let pollInterval = null;
@@ -98,14 +139,21 @@ export default {
       r.downloadLabel = '';
 
       try {
+        const mode = rf.shortsMode || 'vtuber';
         const payload = {
           video_filename: rf.videoFilename,
-          top_zoom:  rf.top.zoom,
-          top_pan_x: rf.top.panX,
-          top_pan_y: rf.top.panY,
+          shorts_mode: mode,
+          // VTuber split params
+          top_zoom:     rf.top.zoom,
+          top_pan_x:    rf.top.panX,
+          top_pan_y:    rf.top.panY,
           bottom_zoom:  rf.bottom.zoom,
           bottom_pan_x: rf.bottom.panX,
           bottom_pan_y: rf.bottom.panY,
+          // Single-section params (zoomed mode)
+          single_zoom:  rf.single.zoom,
+          single_pan_x: rf.single.panX,
+          single_pan_y: rf.single.panY,
         };
         const { job_id } = await startReframeJob(payload);
         r.jobId = job_id;
@@ -150,6 +198,7 @@ export default {
       store.appMode = 'home';
     }
 
+    onMounted(() => loadPreviousUploads());
     onUnmounted(() => { if (pollInterval) clearInterval(pollInterval); });
 
     const videoSrc = computed(() =>
@@ -159,10 +208,11 @@ export default {
     );
 
     return {
-      store, uploading, dragover,
+      store, uploading, dragover, MODE_LABELS,
+      uploads, uploadsLoading, loadPreviousUploads, useExistingUpload, videoURL,
       onFileChange, onDrop, onDragover, onDragleave,
       videoTop, videoBot, playing, syncBot, togglePlay,
-      sectionStyle, startRender, closeRender, goHome,
+      sectionStyle, startRender, closeRender, goHome, setMode, goBack,
       rr, videoSrc,
     };
   },
@@ -170,12 +220,48 @@ export default {
   template: `
     <div class="reframe-view">
 
-      <!-- ── Upload step ── -->
-      <div v-if="store.reframe.step === 'upload'" class="reframe-upload-wrap">
+      <!-- ── Mode picker step ── -->
+      <div v-if="store.reframe.step === 'mode'" class="shorts-mode-pick">
         <button class="btn btn-ghost back-btn" @click="goHome">← Back</button>
         <div class="upload-hero">
-          <h2>VTuber Short — Upload Clip</h2>
-          <p>Upload the clip you want to reframe. You'll pan &amp; zoom each section next.</p>
+          <h2>Shorts Creator — Choose a Style</h2>
+          <p>Pick how you want your horizontal video converted to vertical 9:16.</p>
+        </div>
+        <div class="shorts-mode-cards">
+
+          <div class="shorts-mode-card" @click="setMode('zoomed')">
+            <div class="shorts-mode-icon">&#x1F50D;</div>
+            <h3>Zoomed</h3>
+            <p>Crop &amp; zoom into the action to fill the frame. Pan to pick the perfect spot.</p>
+          </div>
+
+          <div class="shorts-mode-card" @click="setMode('blur_bg')">
+            <div class="shorts-mode-icon">&#x1F32B;&#xFE0F;</div>
+            <h3>Blurred Background</h3>
+            <p>The same video (blurred) fills the background with the original overlaid in the center.</p>
+          </div>
+
+          <div class="shorts-mode-card" @click="setMode('black_bg')">
+            <div class="shorts-mode-icon">&#x2B1B;</div>
+            <h3>Black Background</h3>
+            <p>Your video centered with solid black padding. Clean cinematic look.</p>
+          </div>
+
+          <div class="shorts-mode-card" @click="setMode('vtuber')">
+            <div class="shorts-mode-icon">&#x1F3AD;</div>
+            <h3>VTuber Split-screen</h3>
+            <p>Split layout — top gameplay (40%) + bottom avatar (60%). Full pan &amp; zoom control.</p>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Upload step ── -->
+      <div v-else-if="store.reframe.step === 'upload'" class="reframe-upload-wrap">
+        <button class="btn btn-ghost back-btn" @click="goBack">← Back</button>
+        <div class="upload-hero">
+          <h2>Shorts Creator — Upload Clip</h2>
+          <p>Style: <b>{{ MODE_LABELS[store.reframe.shortsMode] }}</b>. Upload the video you want to convert.</p>
         </div>
         <div class="upload-card-wrap">
           <div class="upload-card"
@@ -198,90 +284,201 @@ export default {
             <div class="progress-track"><div class="progress-fill"></div></div>
           </div>
         </div>
+
+        <!-- Previously Uploaded -->
+        <div class="previous-uploads" style="margin-top:2rem">
+          <div class="prev-uploads-header">
+            <h3>Previously Uploaded</h3>
+            <button class="btn btn-outline btn-sm" @click="loadPreviousUploads">↻ Refresh</button>
+          </div>
+          <div class="uploads-list">
+            <div v-if="uploadsLoading" class="uploads-loading">Loading…</div>
+            <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
+            <div v-else v-for="f in uploads" :key="f.filename" class="upload-item">
+              <div class="upload-item-thumb">
+                <video
+                  :src="videoURL(f.filename)"
+                  preload="metadata"
+                  muted
+                  playsinline
+                  class="upload-item-video"
+                  @loadedmetadata="e => { e.target.currentTime = 1 }"
+                  @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
+                  @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
+                ></video>
+              </div>
+              <div class="upload-item-body">
+                <div class="upload-item-name" :title="f.filename">{{ f.filename }}</div>
+                <div class="upload-item-meta">{{ f.size_mb }} MB</div>
+                <div class="upload-item-action">
+                  <button class="btn btn-primary btn-sm" @click="useExistingUpload(f.filename)">Use ▶</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- ── Editor step ── -->
       <div v-else class="reframe-editor">
 
-        <!-- Left panel: Gameplay (top) -->
+        <!-- ─── Left panel: controls (mode-aware) ─── -->
         <div class="reframe-panel">
-          <div class="reframe-panel-header">
-            <span class="reframe-panel-badge reframe-panel-badge--top">TOP 40%</span>
-            <h3>Gameplay</h3>
-          </div>
 
-          <label class="ctrl-label">
-            Zoom
-            <span class="ctrl-value">{{ store.reframe.top.zoom.toFixed(2) }}×</span>
-          </label>
-          <input class="ctrl-range" type="range" min="1" max="5" step="0.01"
-                 :value="store.reframe.top.zoom"
-                 @input="store.reframe.top.zoom = +$event.target.value" />
+          <!-- ZOOMED: single zoom/pan -->
+          <template v-if="store.reframe.shortsMode === 'zoomed'">
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge reframe-panel-badge--top">FRAME</span>
+              <h3>Zoom &amp; Pan</h3>
+            </div>
 
-          <label class="ctrl-label">
-            Pan X
-            <span class="ctrl-value">{{ store.reframe.top.panX > 0 ? '+' : '' }}{{ store.reframe.top.panX }}%</span>
-          </label>
-          <input class="ctrl-range" type="range" min="-100" max="100" step="1"
-                 :value="store.reframe.top.panX"
-                 @input="store.reframe.top.panX = +$event.target.value" />
+            <label class="ctrl-label">Zoom
+              <span class="ctrl-value">{{ store.reframe.single.zoom.toFixed(2) }}×</span>
+            </label>
+            <input class="ctrl-range" type="range" min="1" max="5" step="0.01"
+                   :value="store.reframe.single.zoom"
+                   @input="store.reframe.single.zoom = +$event.target.value" />
 
-          <label class="ctrl-label">
-            Pan Y
-            <span class="ctrl-value">{{ store.reframe.top.panY > 0 ? '+' : '' }}{{ store.reframe.top.panY }}%</span>
-          </label>
-          <input class="ctrl-range" type="range" min="-100" max="100" step="1"
-                 :value="store.reframe.top.panY"
-                 @input="store.reframe.top.panY = +$event.target.value" />
+            <label class="ctrl-label">Pan X
+              <span class="ctrl-value">{{ store.reframe.single.panX > 0 ? '+' : '' }}{{ store.reframe.single.panX }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.single.panX"
+                   @input="store.reframe.single.panX = +$event.target.value" />
 
-          <button class="btn btn-outline btn-sm" style="margin-top:.5rem"
-                  @click="store.reframe.top = { zoom:1, panX:0, panY:0 }">Reset</button>
+            <label class="ctrl-label">Pan Y
+              <span class="ctrl-value">{{ store.reframe.single.panY > 0 ? '+' : '' }}{{ store.reframe.single.panY }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.single.panY"
+                   @input="store.reframe.single.panY = +$event.target.value" />
 
-          <!-- Divider -->
-          <div class="reframe-divider"></div>
+            <button class="btn btn-outline btn-sm" style="margin-top:.5rem"
+                    @click="store.reframe.single = { zoom:1, panX:0, panY:0 }">Reset</button>
+          </template>
 
-          <div class="reframe-panel-header">
-            <span class="reframe-panel-badge reframe-panel-badge--bottom">BOTTOM 60%</span>
-            <h3>Avatar</h3>
-          </div>
+          <!-- BLUR BG: info only -->
+          <template v-else-if="store.reframe.shortsMode === 'blur_bg'">
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge" style="background:var(--accent2)">AUTO</span>
+              <h3>Blurred Background</h3>
+            </div>
+            <p class="reframe-export-info" style="margin-top:.75rem">
+              The background is automatically generated by blurring and scaling
+              the source video to fill 9:16.<br><br>
+              The original video is overlaid, centered and letterboxed on top.
+            </p>
+          </template>
 
-          <label class="ctrl-label">
-            Zoom
-            <span class="ctrl-value">{{ store.reframe.bottom.zoom.toFixed(2) }}×</span>
-          </label>
-          <input class="ctrl-range" type="range" min="1" max="5" step="0.01"
-                 :value="store.reframe.bottom.zoom"
-                 @input="store.reframe.bottom.zoom = +$event.target.value" />
+          <!-- BLACK BG: info only -->
+          <template v-else-if="store.reframe.shortsMode === 'black_bg'">
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge" style="background:#333">AUTO</span>
+              <h3>Black Background</h3>
+            </div>
+            <p class="reframe-export-info" style="margin-top:.75rem">
+              The video is scaled to fit inside 9:16 with solid black bars
+              filling the remaining space. No adjustments needed — just export.
+            </p>
+          </template>
 
-          <label class="ctrl-label">
-            Pan X
-            <span class="ctrl-value">{{ store.reframe.bottom.panX > 0 ? '+' : '' }}{{ store.reframe.bottom.panX }}%</span>
-          </label>
-          <input class="ctrl-range" type="range" min="-100" max="100" step="1"
-                 :value="store.reframe.bottom.panX"
-                 @input="store.reframe.bottom.panX = +$event.target.value" />
+          <!-- VTUBER: dual top/bottom -->
+          <template v-else>
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge reframe-panel-badge--top">TOP 40%</span>
+              <h3>Gameplay</h3>
+            </div>
 
-          <label class="ctrl-label">
-            Pan Y
-            <span class="ctrl-value">{{ store.reframe.bottom.panY > 0 ? '+' : '' }}{{ store.reframe.bottom.panY }}%</span>
-          </label>
-          <input class="ctrl-range" type="range" min="-100" max="100" step="1"
-                 :value="store.reframe.bottom.panY"
-                 @input="store.reframe.bottom.panY = +$event.target.value" />
+            <label class="ctrl-label">Zoom
+              <span class="ctrl-value">{{ store.reframe.top.zoom.toFixed(2) }}×</span>
+            </label>
+            <input class="ctrl-range" type="range" min="1" max="5" step="0.01"
+                   :value="store.reframe.top.zoom"
+                   @input="store.reframe.top.zoom = +$event.target.value" />
 
-          <button class="btn btn-outline btn-sm" style="margin-top:.5rem"
-                  @click="store.reframe.bottom = { zoom:1, panX:0, panY:0 }">Reset</button>
+            <label class="ctrl-label">Pan X
+              <span class="ctrl-value">{{ store.reframe.top.panX > 0 ? '+' : '' }}{{ store.reframe.top.panX }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.top.panX"
+                   @input="store.reframe.top.panX = +$event.target.value" />
+
+            <label class="ctrl-label">Pan Y
+              <span class="ctrl-value">{{ store.reframe.top.panY > 0 ? '+' : '' }}{{ store.reframe.top.panY }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.top.panY"
+                   @input="store.reframe.top.panY = +$event.target.value" />
+
+            <button class="btn btn-outline btn-sm" style="margin-top:.5rem"
+                    @click="store.reframe.top = { zoom:1, panX:0, panY:0 }">Reset</button>
+
+            <div class="reframe-divider"></div>
+
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge reframe-panel-badge--bottom">BOTTOM 60%</span>
+              <h3>Avatar</h3>
+            </div>
+
+            <label class="ctrl-label">Zoom
+              <span class="ctrl-value">{{ store.reframe.bottom.zoom.toFixed(2) }}×</span>
+            </label>
+            <input class="ctrl-range" type="range" min="1" max="5" step="0.01"
+                   :value="store.reframe.bottom.zoom"
+                   @input="store.reframe.bottom.zoom = +$event.target.value" />
+
+            <label class="ctrl-label">Pan X
+              <span class="ctrl-value">{{ store.reframe.bottom.panX > 0 ? '+' : '' }}{{ store.reframe.bottom.panX }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.bottom.panX"
+                   @input="store.reframe.bottom.panX = +$event.target.value" />
+
+            <label class="ctrl-label">Pan Y
+              <span class="ctrl-value">{{ store.reframe.bottom.panY > 0 ? '+' : '' }}{{ store.reframe.bottom.panY }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="-100" max="100" step="1"
+                   :value="store.reframe.bottom.panY"
+                   @input="store.reframe.bottom.panY = +$event.target.value" />
+
+            <button class="btn btn-outline btn-sm" style="margin-top:.5rem"
+                    @click="store.reframe.bottom = { zoom:1, panX:0, panY:0 }">Reset</button>
+          </template>
         </div>
 
-        <!-- Center: 9:16 Preview -->
+        <!-- Center: 9:16 Preview (mode-aware) -->
         <div class="reframe-center">
-          <button class="btn btn-ghost back-btn" @click="goHome">← Back</button>
+          <button class="btn btn-ghost back-btn" @click="goBack">← Back</button>
           <p class="reframe-hint">Live preview — what you see is what will be exported</p>
 
           <div class="reframe-canvas-wrap">
-            <div class="reframe-canvas">
 
-              <!-- Top section: Gameplay (40%) -->
+            <!-- ZOOMED preview -->
+            <div v-if="store.reframe.shortsMode === 'zoomed'" class="reframe-canvas" style="background:#000; overflow:hidden; position:relative;">
+              <video :src="videoSrc" ref="videoTop"
+                     :style="sectionStyle('single')"
+                     preload="metadata" playsinline muted loop />
+            </div>
+
+            <!-- BLUR BG preview -->
+            <div v-else-if="store.reframe.shortsMode === 'blur_bg'" class="reframe-canvas" style="overflow:hidden; position:relative;">
+              <video :src="videoSrc" ref="videoTop"
+                     style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;filter:blur(20px) brightness(0.6);"
+                     preload="metadata" playsinline muted loop />
+              <video :src="videoSrc" ref="videoBot"
+                     style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;"
+                     preload="metadata" playsinline muted loop />
+            </div>
+
+            <!-- BLACK BG preview -->
+            <div v-else-if="store.reframe.shortsMode === 'black_bg'" class="reframe-canvas" style="background:#000; overflow:hidden; position:relative;">
+              <video :src="videoSrc" ref="videoTop"
+                     style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;"
+                     preload="metadata" playsinline muted loop />
+            </div>
+
+            <!-- VTUBER split preview -->
+            <div v-else class="reframe-canvas">
               <div class="reframe-section reframe-section--top">
                 <video :src="videoSrc" ref="videoTop"
                        :style="sectionStyle('top')"
@@ -289,21 +486,17 @@ export default {
                        preload="metadata" playsinline muted loop />
                 <div class="reframe-section-label">Gameplay</div>
               </div>
-
-              <!-- Subtitle zone indicator -->
               <div class="reframe-sub-zone">
                 <span class="reframe-sub-label">Subtitle area</span>
               </div>
-
-              <!-- Bottom section: Avatar (60%) -->
               <div class="reframe-section reframe-section--bottom">
                 <video :src="videoSrc" ref="videoBot"
                        :style="sectionStyle('bottom')"
                        preload="metadata" playsinline muted loop />
                 <div class="reframe-section-label reframe-section-label--bottom">Avatar</div>
               </div>
-
             </div>
+
           </div>
 
           <!-- Playback controls -->
@@ -318,7 +511,7 @@ export default {
         <div class="reframe-panel reframe-panel--right">
           <h3 style="margin-bottom:1rem">Export</h3>
           <p class="reframe-export-info">Output: <b>1080 × 1920</b> (9:16 vertical)</p>
-          <p class="reframe-export-info">Top: <b>40%</b> gameplay · Bottom: <b>60%</b> avatar</p>
+          <p class="reframe-export-info">Mode: <b>{{ MODE_LABELS[store.reframe.shortsMode] }}</b></p>
 
           <button class="btn btn-primary reframe-render-btn"
                   :disabled="rr.active"
@@ -347,8 +540,8 @@ export default {
 
           <div class="reframe-divider"></div>
           <p class="reframe-export-info" style="color:var(--text-dim); font-size:.75rem">
-            Tip: Drag the sliders to adjust which part of the source video fills each
-            section. Zoom in to hide black bars.
+            Tip: Use the sliders on the left to frame the shot. Zoom in to fill
+            the canvas edge-to-edge.
           </p>
         </div>
 

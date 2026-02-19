@@ -9,7 +9,7 @@ export default {
     }
 
     function goVtuber() {
-      store.reframe.step = 'upload';
+      store.reframe.step = 'mode';
       store.appMode = 'vtuber';
     }
 
@@ -44,19 +44,19 @@ export default {
           <button class="btn btn-primary home-card-btn">Get Started →</button>
         </div>
 
-        <!-- VTuber Short card -->
+        <!-- Shorts Creator card -->
         <div class="home-card home-card--vtuber" @click="goVtuber">
-          <div class="home-card-icon">🎭</div>
-          <h2 class="home-card-title">VTuber Short</h2>
+          <div class="home-card-icon">🎥</div>
+          <h2 class="home-card-title">Shorts Creator</h2>
           <p class="home-card-desc">
-            Turn a single clip into a vertical short with a split-screen layout —
-            top gameplay (40%) and bottom avatar (60%). Pan &amp; zoom each frame
-            to nail the composition, then export.
+            Convert any horizontal video into a 9:16 vertical short. Choose
+            from four styles: zoomed-in, blurred background, black bars, or
+            the VTuber split-screen layout with custom pan &amp; zoom.
           </p>
           <div class="home-card-tags">
-            <span class="tag">Split screen</span>
             <span class="tag">9:16 vertical</span>
-            <span class="tag">Pan &amp; zoom</span>
+            <span class="tag">Blur / Zoom / Black</span>
+            <span class="tag">VTuber split</span>
           </div>
           <button class="btn btn-accent home-card-btn">Get Started →</button>
         </div>

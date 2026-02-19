@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import store, { getActiveGroups, saveUndoSnapshot, regenerateAutoGroups } from '../store.js';
 
 export default {
@@ -11,10 +11,23 @@ export default {
     const hoveredGroup = ref(null);
     let rafId = null;
 
+    // ── Zoom state ────────────────────────────────────────────────
+    const zoomLevel = ref(1);        // 1 = fit all, higher = zoomed in
+    const scrollLeft = ref(0);       // scroll offset in px
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 60;
+    const ZOOM_STEP = 1.25;          // multiplier per wheel tick
+
     // ── Group drag state ──────────────────────────────────────────
-    // mode: 'start' | 'end' | 'move'
     const groupDrag = ref(null);
     const playheadDrag = ref(false);
+    // ── Trim marker drag state ──────────────────────────
+    // mode: 'in' | 'out'
+    const trimDrag = ref(null);
+    // ── Middle-mouse pan state ────────────────────────────────────
+    let isPanning = false;
+    let panStartX = 0;
+    let panStartScroll = 0;
 
     function getVideo() {
       return document.getElementById('editor-video');
@@ -22,6 +35,10 @@ export default {
 
     function getTrackEl() {
       return document.querySelector('.timeline-track');
+    }
+
+    function getTrackWrapper() {
+      return document.querySelector('.timeline-track-wrapper');
     }
 
     function togglePlay() {
@@ -41,6 +58,24 @@ export default {
         }
       }
       rafId = requestAnimationFrame(tick);
+    }
+
+    // ── Auto-scroll to keep playhead visible ──────────────────────
+    function autoScrollToPlayhead() {
+      if (zoomLevel.value <= 1) return;
+      const wrapper = getTrackWrapper();
+      if (!wrapper) return;
+      const wrapperWidth = wrapper.clientWidth;
+      const totalWidth = wrapperWidth * zoomLevel.value;
+      const playheadX = (currentTime.value / (duration.value || 1)) * totalWidth;
+      const viewLeft = wrapper.scrollLeft;
+      const viewRight = viewLeft + wrapperWidth;
+      const margin = wrapperWidth * 0.15;
+      if (playheadX < viewLeft + margin) {
+        wrapper.scrollLeft = Math.max(0, playheadX - margin);
+      } else if (playheadX > viewRight - margin) {
+        wrapper.scrollLeft = playheadX - wrapperWidth + margin;
+      }
     }
 
     onMounted(() => {
@@ -77,7 +112,7 @@ export default {
       return duration.value ? Math.max(0, Math.min(100, (t / duration.value) * 100)) : 0;
     }
 
-    // ── Track scrub ───────────────────────────────────────────────
+    // ── Track scrub (zoom-aware) ──────────────────────────────────
     function seekFromEvent(e) {
       const trackEl = getTrackEl();
       if (!trackEl) return;
@@ -87,9 +122,74 @@ export default {
     }
 
     function onTrackMouseDown(e) {
+      // Middle-mouse = pan
+      if (e.button === 1) {
+        e.preventDefault();
+        isPanning = true;
+        panStartX = e.clientX;
+        const wrapper = getTrackWrapper();
+        panStartScroll = wrapper ? wrapper.scrollLeft : 0;
+        return;
+      }
       isDragging.value = true;
       seekFromEvent(e);
     }
+
+    // ── Zoom via scroll wheel ─────────────────────────────────────
+    function onWheelZoom(e) {
+      e.preventDefault();
+      const wrapper = getTrackWrapper();
+      if (!wrapper) return;
+
+      const rect = wrapper.getBoundingClientRect();
+      const mouseXInWrapper = e.clientX - rect.left;  // mouse pos relative to wrapper
+      const oldScroll = wrapper.scrollLeft;
+      const oldZoom = zoomLevel.value;
+
+      // Compute the time under the mouse cursor
+      const totalOldWidth = rect.width * oldZoom;
+      const mousePosRatio = (oldScroll + mouseXInWrapper) / totalOldWidth;
+
+      // Apply zoom
+      if (e.deltaY < 0) {
+        zoomLevel.value = Math.min(MAX_ZOOM, oldZoom * ZOOM_STEP);
+      } else {
+        zoomLevel.value = Math.max(MIN_ZOOM, oldZoom / ZOOM_STEP);
+      }
+
+      // Reposition scroll so the time under cursor stays in place
+      nextTick(() => {
+        const newTotalWidth = rect.width * zoomLevel.value;
+        wrapper.scrollLeft = mousePosRatio * newTotalWidth - mouseXInWrapper;
+      });
+    }
+
+    function zoomIn() {
+      zoomLevel.value = Math.min(MAX_ZOOM, zoomLevel.value * ZOOM_STEP);
+      nextTick(autoScrollToPlayhead);
+    }
+
+    function zoomOut() {
+      zoomLevel.value = Math.max(MIN_ZOOM, zoomLevel.value / ZOOM_STEP);
+      if (zoomLevel.value <= 1) {
+        const wrapper = getTrackWrapper();
+        if (wrapper) wrapper.scrollLeft = 0;
+      }
+    }
+
+    function zoomReset() {
+      zoomLevel.value = 1;
+      const wrapper = getTrackWrapper();
+      if (wrapper) wrapper.scrollLeft = 0;
+    }
+
+    function zoomToFit() {
+      zoomLevel.value = 1;
+      const wrapper = getTrackWrapper();
+      if (wrapper) wrapper.scrollLeft = 0;
+    }
+
+    const zoomPct = computed(() => Math.round(zoomLevel.value * 100));
 
     // ── Group timing drag ─────────────────────────────────────────
     function ensureCustomGroups(gi) {
@@ -118,7 +218,24 @@ export default {
       };
     }
 
+    // ── Trim marker drag ─────────────────────────────────
+    function onTrimMarkerMouseDown(e, mode) {
+      e.stopPropagation();
+      e.preventDefault();
+      const trackEl = getTrackEl();
+      if (!trackEl) return;
+      trimDrag.value = { mode, trackWidth: trackEl.getBoundingClientRect().width };
+    }
+
     function onWindowMouseMove(e) {
+      // Middle-mouse panning
+      if (isPanning) {
+        const wrapper = getTrackWrapper();
+        if (wrapper) {
+          wrapper.scrollLeft = panStartScroll - (e.clientX - panStartX);
+        }
+        return;
+      }
       if (groupDrag.value) {
         const d = groupDrag.value;
         const dx = e.clientX - d.startPx;
@@ -131,10 +248,24 @@ export default {
         } else if (d.mode === 'end') {
           g.end = parseFloat(Math.max(d.origStart + 0.1, Math.min(d.origEnd + dt, duration.value)).toFixed(2));
         } else {
-          // move: clamp so block stays within [0, duration]
           const newStart = Math.max(0, Math.min(d.origStart + dt, duration.value - blockDur));
           g.start = parseFloat(newStart.toFixed(2));
           g.end = parseFloat((newStart + blockDur).toFixed(2));
+        }
+        return;
+      }
+      if (trimDrag.value) {
+        const d = trimDrag.value;
+        const trackEl = getTrackEl();
+        if (trackEl) {
+          const rect = trackEl.getBoundingClientRect();
+          const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+          const t = parseFloat(((x / rect.width) * duration.value).toFixed(3));
+          if (d.mode === 'in') {
+            store.trimmer.inPoint = Math.min(t, store.trimmer.outPoint !== null ? store.trimmer.outPoint - 0.05 : t);
+          } else {
+            store.trimmer.outPoint = Math.max(t, store.trimmer.inPoint !== null ? store.trimmer.inPoint + 0.05 : t);
+          }
         }
         return;
       }
@@ -146,6 +277,14 @@ export default {
     }
 
     function onWindowMouseUp() {
+      if (trimDrag.value) {
+        trimDrag.value = null;
+        return;
+      }
+      if (isPanning) {
+        isPanning = false;
+        return;
+      }
       if (groupDrag.value) {
         const d = groupDrag.value;
         const g = store.customGroups[d.gi];
@@ -181,25 +320,67 @@ export default {
       return m + ':' + String(s).padStart(2, '0');
     }
 
+    function formatTimePrecise(t) {
+      const m = Math.floor(t / 60);
+      const s = (t % 60).toFixed(1);
+      return m + ':' + String(s).padStart(4, '0');
+    }
+
+    // ── Dynamic tick marks based on zoom level ────────────────────
     const tickMarks = computed(() => {
       if (!duration.value) return [];
-      let step = 5;
-      if (duration.value > 120) step = 15;
-      if (duration.value > 300) step = 30;
-      if (duration.value > 600) step = 60;
+      const z = zoomLevel.value;
+      // Choose step so ticks are never too dense or too sparse
+      let step;
+      const visibleDuration = duration.value / z;
+      if (visibleDuration <= 5) step = 0.5;
+      else if (visibleDuration <= 15) step = 1;
+      else if (visibleDuration <= 30) step = 2;
+      else if (visibleDuration <= 60) step = 5;
+      else if (visibleDuration <= 120) step = 10;
+      else if (visibleDuration <= 300) step = 15;
+      else if (visibleDuration <= 600) step = 30;
+      else step = 60;
       const marks = [];
       for (let t = 0; t <= duration.value; t += step) marks.push(t);
       return marks;
     });
 
-    // Uniform color for all group blocks
+    // Use ms in tick labels when zoomed in enough
+    const showMsInTicks = computed(() => {
+      const visibleDuration = duration.value / zoomLevel.value;
+      return visibleDuration <= 15;
+    });
+
     function groupColor() { return 'rgba(124, 92, 252, 0.30)'; }
     function groupBorderColor() { return 'rgba(124, 92, 252, 0.65)'; }
+
+    // ── Trim markers from store ────────────────────────────
+    const trimIn  = computed(() => store.trimmer.inPoint);
+    const trimOut = computed(() => store.trimmer.outPoint);
+
+    const trimRegionStyle = computed(() => {
+      if (trimIn.value === null || trimOut.value === null) return null;
+      const left  = pct(trimIn.value);
+      const right = 100 - pct(trimOut.value);
+      return { left: left + '%', right: right + '%' };
+    });
+
+    // Track inner width style for zoomed content
+    const trackInnerStyle = computed(() => ({
+      width: (zoomLevel.value * 100) + '%',
+      position: 'relative',
+      height: '100%',
+    }));
 
     return {
       currentTime, duration, groups, isDragging, groupDrag, hoveredGroup, playheadDrag,
       pct, onTrackMouseDown, onGroupHandleMouseDown, onPlayheadMouseDown, togglePlay,
-      formatTime, formatTimeNoMs, fmtSec, tickMarks, groupColor, groupBorderColor,
+      formatTime, formatTimeNoMs, formatTimePrecise, fmtSec, tickMarks, showMsInTicks,
+      groupColor, groupBorderColor,
+      zoomLevel, zoomPct, zoomIn, zoomOut, zoomReset, zoomToFit, onWheelZoom,
+      trackInnerStyle, autoScrollToPlayhead,
+      trimIn, trimOut, trimRegionStyle, onTrimMarkerMouseDown, trimDrag,
     };
   },
   template: `
@@ -214,73 +395,112 @@ export default {
           <button class="timeline-play-btn" @click="togglePlay" title="Play / Pause">
             ▶ / ⏸
           </button>
-        </div>
 
-        <!-- Scrub track -->
-        <div class="timeline-track"
-             @mousedown="onTrackMouseDown">
-
-          <!-- Background bar -->
-          <div class="timeline-bg"></div>
-
-          <!-- Played bar -->
-          <div class="timeline-played" :style="{ width: pct(currentTime) + '%' }"></div>
-
-          <!-- Group blocks -->
-          <div v-for="(g, i) in groups" :key="i"
-               class="timeline-group"
-               :class="{ 'is-dragging': groupDrag && groupDrag.gi === i }"
-               :style="{
-                 left: pct(g.start) + '%',
-                 width: Math.max(0.6, pct(g.end) - pct(g.start)) + '%',
-                 background: groupColor(i),
-                 borderColor: groupBorderColor(i),
-               }"
-               :title="'#' + (i+1) + ' ' + g.words.map(w => w.text).join(' ')">
-
-            <!-- Left resize handle -->
-            <div class="tg-handle tg-handle-start"
-                 @mousedown.stop="onGroupHandleMouseDown($event, i, 'start')"
-                 title="Drag to adjust start time"></div>
-
-            <!-- Body — drag to move -->
-            <div class="tg-body"
-                 @mousedown.stop="onGroupHandleMouseDown($event, i, 'move')">
-              <span class="timeline-group-label">
-                {{ g.words.slice(0, 3).map(w => w.text).join(' ') }}{{ g.words.length > 3 ? '…' : '' }}
-              </span>
-            </div>
-
-            <!-- Right resize handle -->
-            <div class="tg-handle tg-handle-end"
-                 @mousedown.stop="onGroupHandleMouseDown($event, i, 'end')"
-                 title="Drag to adjust end time"></div>
-
-            <!-- Timing tooltip while dragging -->
-            <div v-if="groupDrag && groupDrag.gi === i" class="timeline-drag-tooltip">
-              {{ fmtSec(g.start) }}s – {{ fmtSec(g.end) }}s
-            </div>
-          </div>
-
-          <!-- Playhead — draggable -->
-          <div class="timeline-playhead" 
-               :class="{ 'is-dragging': playheadDrag }"
-               :style="{ left: pct(currentTime) + '%' }"
-               @mousedown="onPlayheadMouseDown">
-            <div class="timeline-playhead-head"></div>
-            <div v-if="playheadDrag" class="timeline-playhead-tooltip">
-              {{ formatTime(currentTime) }}
-            </div>
+          <div class="timeline-zoom-controls">
+            <button class="timeline-zoom-btn" @click="zoomOut" :disabled="zoomLevel <= 1" title="Zoom out (or scroll down)">−</button>
+            <span class="timeline-zoom-label" @click="zoomReset" title="Click to reset zoom">{{ zoomPct }}%</span>
+            <button class="timeline-zoom-btn" @click="zoomIn" :disabled="zoomLevel >= 60" title="Zoom in (or scroll up)">+</button>
+            <button v-if="zoomLevel > 1" class="timeline-zoom-btn timeline-zoom-fit" @click="zoomToFit" title="Fit to view">⊟</button>
           </div>
         </div>
 
-        <!-- Time ruler -->
-        <div class="timeline-ruler">
-          <div v-for="t in tickMarks" :key="t"
-               class="timeline-tick"
-               :style="{ left: pct(t) + '%' }">
-            <div class="timeline-tick-mark"></div>
-            <span class="timeline-tick-label">{{ formatTimeNoMs(t) }}</span>
+        <!-- Scrollable track wrapper -->
+        <div class="timeline-track-wrapper"
+             @wheel.prevent="onWheelZoom">
+          <!-- Scrub track (inner, scaled by zoom) -->
+          <div class="timeline-track"
+               :style="trackInnerStyle"
+               @mousedown="onTrackMouseDown">
+
+            <!-- Background bar -->
+            <div class="timeline-bg"></div>
+
+            <!-- Played bar -->
+            <div class="timeline-played" :style="{ width: pct(currentTime) + '%' }"></div>
+
+            <!-- Trim region shading -->
+            <div v-if="trimRegionStyle"
+                 class="timeline-trim-region"
+                 :style="trimRegionStyle"></div>
+
+            <!-- Trim In marker -->
+            <div v-if="trimIn !== null"
+                 class="timeline-trim-marker timeline-trim-in"
+                 :class="{ 'is-dragging': trimDrag && trimDrag.mode === 'in' }"
+                 :style="{ left: pct(trimIn) + '%' }"
+                 @mousedown.stop="onTrimMarkerMouseDown($event, 'in')"
+                 title="In point — drag to adjust">
+              <div class="trim-marker-head trim-marker-head-in">I</div>
+              <div class="trim-marker-label">{{ fmtSec(trimIn) }}s</div>
+            </div>
+
+            <!-- Trim Out marker -->
+            <div v-if="trimOut !== null"
+                 class="timeline-trim-marker timeline-trim-out"
+                 :class="{ 'is-dragging': trimDrag && trimDrag.mode === 'out' }"
+                 :style="{ left: pct(trimOut) + '%' }"
+                 @mousedown.stop="onTrimMarkerMouseDown($event, 'out')"
+                 title="Out point — drag to adjust">
+              <div class="trim-marker-head trim-marker-head-out">O</div>
+              <div class="trim-marker-label">{{ fmtSec(trimOut) }}s</div>
+            </div>
+
+            <!-- Group blocks -->
+            <div v-for="(g, i) in groups" :key="i"
+                 class="timeline-group"
+                 :class="{ 'is-dragging': groupDrag && groupDrag.gi === i }"
+                 :style="{
+                   left: pct(g.start) + '%',
+                   width: Math.max(0.3, pct(g.end) - pct(g.start)) + '%',
+                   background: groupColor(i),
+                   borderColor: groupBorderColor(i),
+                 }"
+                 :title="'#' + (i+1) + ' ' + g.words.map(w => w.text).join(' ')">
+
+              <!-- Left resize handle -->
+              <div class="tg-handle tg-handle-start"
+                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'start')"
+                   title="Drag to adjust start time"></div>
+
+              <!-- Body — drag to move -->
+              <div class="tg-body"
+                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'move')">
+                <span class="timeline-group-label">
+                  {{ g.words.slice(0, 3).map(w => w.text).join(' ') }}{{ g.words.length > 3 ? '…' : '' }}
+                </span>
+              </div>
+
+              <!-- Right resize handle -->
+              <div class="tg-handle tg-handle-end"
+                   @mousedown.stop="onGroupHandleMouseDown($event, i, 'end')"
+                   title="Drag to adjust end time"></div>
+
+              <!-- Timing tooltip while dragging -->
+              <div v-if="groupDrag && groupDrag.gi === i" class="timeline-drag-tooltip">
+                {{ fmtSec(g.start) }}s – {{ fmtSec(g.end) }}s
+              </div>
+            </div>
+
+            <!-- Playhead — draggable -->
+            <div class="timeline-playhead" 
+                 :class="{ 'is-dragging': playheadDrag }"
+                 :style="{ left: pct(currentTime) + '%' }"
+                 @mousedown="onPlayheadMouseDown">
+              <div class="timeline-playhead-head"></div>
+              <div v-if="playheadDrag" class="timeline-playhead-tooltip">
+                {{ formatTime(currentTime) }}
+              </div>
+            </div>
+
+            <!-- Time ruler (inside the zoomed track) -->
+            <div class="timeline-ruler-inner">
+              <div v-for="t in tickMarks" :key="t"
+                   class="timeline-tick"
+                   :style="{ left: pct(t) + '%' }">
+                <div class="timeline-tick-mark"></div>
+                <span class="timeline-tick-label">{{ showMsInTicks ? formatTimePrecise(t) : formatTimeNoMs(t) }}</span>
+              </div>
+            </div>
           </div>
         </div>
 

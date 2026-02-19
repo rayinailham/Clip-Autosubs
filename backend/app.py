@@ -24,7 +24,12 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from renderer import check_ffmpeg, get_video_info, render_video
-from reframe_renderer import render_vtuber_short
+from reframe_renderer import (
+    render_vtuber_short,
+    render_shorts_zoomed,
+    render_shorts_blur_bg,
+    render_shorts_black_bg,
+)
 from silence_cutter import cut_silence
 from subtitle_generator import generate_ass, save_ass
 from transcribe import get_vram_usage, transcribe_video
@@ -62,6 +67,9 @@ reframe_jobs: dict = {}
 # ─── In-memory YT Clipper job trackers ───────────────────────
 yt_analyze_jobs: dict = {}
 yt_cut_jobs: dict = {}
+
+# ─── In-memory Trim job tracker ──────────────────────────────
+trim_jobs: dict = {}
 
 
 # ─── Pydantic Models ────────────────────────────────────────
@@ -156,12 +164,19 @@ class SaveStyleRequest(BaseModel):
 
 class ReframeRequest(BaseModel):
     video_filename: str
+    # Mode: 'vtuber' | 'zoomed' | 'blur_bg' | 'black_bg'
+    shorts_mode: str = "vtuber"
+    # VTuber split-screen params
     top_zoom: float = 1.0
     top_pan_x: float = 0.0   # −100 … +100
     top_pan_y: float = 0.0
     bottom_zoom: float = 1.0
     bottom_pan_x: float = 0.0
     bottom_pan_y: float = 0.0
+    # Single-section params (zoomed mode)
+    single_zoom: float = 1.0
+    single_pan_x: float = 0.0
+    single_pan_y: float = 0.0
     out_width: int = 1080
     out_height: int = 1920
     crf: int = 18
@@ -173,6 +188,12 @@ class RenderRequest(BaseModel):
     words: list[WordItem]
     word_groups: Optional[list[WordGroup]] = None  # Custom groups with timing control
     style: StyleConfig = StyleConfig()
+
+
+class TrimRequest(BaseModel):
+    video_filename: str
+    trim_start: float        # seconds
+    trim_end: float          # seconds
 
 
 class YtAnalyzeRequest(BaseModel):
@@ -259,6 +280,9 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
 async def serve_video(filename: str):
     """Stream an uploaded video file for the browser player."""
     file_path = UPLOAD_DIR / filename
+    if not file_path.exists():
+        # Fall back to rendered directory (e.g. silence-cut output)
+        file_path = RENDERED_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
 
@@ -421,6 +445,43 @@ async def list_uploads():
             })
     files.sort(key=lambda x: x["filename"])
     return {"files": files}
+
+
+@app.delete("/uploads/{filename}")
+async def delete_upload(filename: str):
+    """Delete an uploaded video and its associated transcription / style files."""
+    video_path = UPLOAD_DIR / filename
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+
+    stem = Path(filename).stem
+    deleted = []
+
+    try:
+        video_path.unlink()
+        deleted.append(filename)
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not delete video: {e}")
+
+    # Remove transcription JSON if present
+    transcription_path = OUTPUT_DIR / f"{stem}_transcription.json"
+    if transcription_path.exists():
+        try:
+            transcription_path.unlink()
+            deleted.append(transcription_path.name)
+        except OSError:
+            pass
+
+    # Remove style JSON if present
+    style_path = OUTPUT_DIR / f"{stem}_style.json"
+    if style_path.exists():
+        try:
+            style_path.unlink()
+            deleted.append(style_path.name)
+        except OSError:
+            pass
+
+    return {"deleted": deleted}
 
 
 @app.post("/transcribe-existing")
@@ -592,7 +653,7 @@ async def upload_only(file: UploadFile = File(...)):
 # ─── VTuber Short Reframe Render ─────────────────────────────
 
 def _do_reframe(job_id: str, req: ReframeRequest):
-    """Background task: render VTuber split-screen short."""
+    """Background task: render a Shorts-format video using the chosen mode."""
     logs: list[str] = []
 
     def progress(msg: str):
@@ -610,24 +671,61 @@ def _do_reframe(job_id: str, req: ReframeRequest):
 
         reframe_jobs[job_id]["status"] = "processing"
 
-        output_filename = f"{video_path.stem}_vtuber_{job_id}.mp4"
+        mode = req.shorts_mode or "vtuber"
+        suffix = {"vtuber": "vtuber", "zoomed": "zoomed",
+                  "blur_bg": "blurbg", "black_bg": "blackbg"}.get(mode, mode)
+        output_filename = f"{video_path.stem}_{suffix}_{job_id}.mp4"
         output_path = RENDERED_DIR / output_filename
 
-        render_vtuber_short(
-            video_path=str(video_path),
-            output_path=str(output_path),
-            top_zoom=req.top_zoom,
-            top_pan_x=req.top_pan_x,
-            top_pan_y=req.top_pan_y,
-            bottom_zoom=req.bottom_zoom,
-            bottom_pan_x=req.bottom_pan_x,
-            bottom_pan_y=req.bottom_pan_y,
-            out_width=req.out_width,
-            out_height=req.out_height,
-            crf=req.crf,
-            preset=req.preset,
-            progress_cb=progress,
-        )
+        if mode == "zoomed":
+            render_shorts_zoomed(
+                video_path=str(video_path),
+                output_path=str(output_path),
+                zoom=req.single_zoom,
+                pan_x=req.single_pan_x,
+                pan_y=req.single_pan_y,
+                out_width=req.out_width,
+                out_height=req.out_height,
+                crf=req.crf,
+                preset=req.preset,
+                progress_cb=progress,
+            )
+        elif mode == "blur_bg":
+            render_shorts_blur_bg(
+                video_path=str(video_path),
+                output_path=str(output_path),
+                out_width=req.out_width,
+                out_height=req.out_height,
+                crf=req.crf,
+                preset=req.preset,
+                progress_cb=progress,
+            )
+        elif mode == "black_bg":
+            render_shorts_black_bg(
+                video_path=str(video_path),
+                output_path=str(output_path),
+                out_width=req.out_width,
+                out_height=req.out_height,
+                crf=req.crf,
+                preset=req.preset,
+                progress_cb=progress,
+            )
+        else:  # 'vtuber'
+            render_vtuber_short(
+                video_path=str(video_path),
+                output_path=str(output_path),
+                top_zoom=req.top_zoom,
+                top_pan_x=req.top_pan_x,
+                top_pan_y=req.top_pan_y,
+                bottom_zoom=req.bottom_zoom,
+                bottom_pan_x=req.bottom_pan_x,
+                bottom_pan_y=req.bottom_pan_y,
+                out_width=req.out_width,
+                out_height=req.out_height,
+                crf=req.crf,
+                preset=req.preset,
+                progress_cb=progress,
+            )
 
         reframe_jobs[job_id] = {
             "status": "done",
@@ -656,6 +754,103 @@ async def get_reframe_status(job_id: str):
     if job_id not in reframe_jobs:
         raise HTTPException(status_code=404, detail="Reframe job not found")
     return reframe_jobs[job_id]
+
+
+# ─── Manual Trim ────────────────────────────────────────────
+
+def _do_trim(job_id: str, req: TrimRequest):
+    """Background task: trim video to [trim_start, trim_end] using FFmpeg."""
+    logs: list[str] = []
+
+    def log(msg: str):
+        logs.append(msg)
+        trim_jobs[job_id]["log"] = msg
+        print(f"[trim] {msg}")
+
+    try:
+        video_path = UPLOAD_DIR / req.video_filename
+        if not video_path.exists():
+            # Also check rendered dir (e.g. a silence-cut file)
+            video_path = RENDERED_DIR / req.video_filename
+        if not video_path.exists():
+            trim_jobs[job_id] = {"status": "error", "error": f"Video not found: {req.video_filename}"}
+            return
+
+        trim_jobs[job_id]["status"] = "processing"
+
+        duration = req.trim_end - req.trim_start
+        if duration <= 0:
+            trim_jobs[job_id] = {"status": "error", "error": "trim_end must be greater than trim_start"}
+            return
+
+        log(f"Trimming {video_path.name}  {req.trim_start:.3f}s → {req.trim_end:.3f}s  ({duration:.3f}s)")
+
+        output_filename = f"{video_path.stem}_trim_{job_id}.mp4"
+        output_path = RENDERED_DIR / output_filename
+
+        import subprocess, time as _time
+        t0 = _time.time()
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(video_path),
+            "-ss", str(req.trim_start),
+            "-to", str(req.trim_end),
+            "-c:v", "libx264",
+            "-crf", "18",
+            "-preset", "fast",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-avoid_negative_ts", "make_zero",
+            "-movflags", "+faststart",
+            str(output_path),
+        ]
+
+        log(f"Running FFmpeg…")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+
+        if result.returncode != 0:
+            tail = result.stderr[-1200:] if result.stderr else "No stderr"
+            raise RuntimeError(f"FFmpeg failed (code {result.returncode}):\n{tail}")
+
+        if not output_path.exists():
+            raise RuntimeError("FFmpeg exited 0 but output file was not created.")
+
+        elapsed = round(_time.time() - t0, 1)
+        size_mb = round(output_path.stat().st_size / (1024 * 1024), 2)
+        log(f"Done in {elapsed}s → {output_filename} ({size_mb} MB)")
+
+        trim_jobs[job_id] = {
+            "status": "done",
+            "filename": output_filename,
+            "url": f"/rendered/{output_filename}",
+            "trim_start": req.trim_start,
+            "trim_end": req.trim_end,
+            "duration_s": round(duration, 3),
+            "size_mb": size_mb,
+            "processing_time_s": elapsed,
+        }
+
+    except Exception as e:
+        print(f"[trim] Error: {e}")
+        trim_jobs[job_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/trim")
+async def start_trim(req: TrimRequest, background_tasks: BackgroundTasks):
+    """Start a background trim job. Returns job_id for polling."""
+    job_id = uuid.uuid4().hex[:8]
+    trim_jobs[job_id] = {"status": "queued", "log": "Queued…"}
+    background_tasks.add_task(_do_trim, job_id, req)
+    return {"job_id": job_id}
+
+
+@app.get("/trim-status/{job_id}")
+async def get_trim_status(job_id: str):
+    """Poll the status of a trim job."""
+    if job_id not in trim_jobs:
+        raise HTTPException(status_code=404, detail="Trim job not found")
+    return trim_jobs[job_id]
 
 
 # ─── YT Clipper ───────────────────────────────────────────────
@@ -758,4 +953,5 @@ async def yt_clip_cut_status(job_id: str):
 
 # ─── Static Files ──────────────────────────────────────────
 
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")

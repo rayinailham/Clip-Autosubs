@@ -525,3 +525,144 @@
 }
 .sc-reset-btn:hover { border-color: var(--accent); color: var(--accent); }
 
+
+/* ── Trim Panel ───────────────────────────────── */
+.trim-panel {
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+/* In / Out point row */
+.trim-point-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.trim-point-label {
+  flex-shrink: 0;
+  width: 36px;
+}
+
+.trim-badge {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  user-select: none;
+}
+.trim-badge-in  { background: rgba(0,220,130,0.15); color: #00dc82; border: 1px solid rgba(0,220,130,0.4); }
+.trim-badge-out { background: rgba(255,146,43,0.15); color: #ff922b; border: 1px solid rgba(255,146,43,0.4); }
+
+.trim-time-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 0.3rem 0.5rem;
+  border-radius: 5px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  transition: border-color 0.15s;
+}
+.trim-time-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.trim-time-input:disabled { opacity: 0.45; }
+
+.trim-set-btn {
+  flex-shrink: 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.12);
+  color: var(--text-dim);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.trim-set-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+.trim-set-btn:disabled { opacity: 0.35; cursor: default; }
+
+.trim-seek-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 0.7rem;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--text-dim);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+.trim-seek-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Selection summary bar */
+.trim-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: rgba(0,220,130,0.08);
+  border: 1px solid rgba(0,220,130,0.2);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.68rem;
+}
+.trim-summary-label {
+  color: #00dc82;
+  font-weight: 700;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  flex-shrink: 0;
+}
+.trim-summary-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.68rem;
+}
+.trim-summary-dur {
+  margin-left: auto;
+  color: #00dc82;
+  font-weight: 600;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Actions row */
+.trim-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.trim-clear-btn {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  padding: 0.4rem 0.75rem;
+}
+.trim-cut-btn {
+  flex: 1;
+  justify-content: center;
+}
+

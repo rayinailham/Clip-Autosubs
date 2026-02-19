@@ -78,6 +78,15 @@ export async function pollCutSilenceStatus(jobId) {
   return res.json();
 }
 
+export async function deleteUpload(filename) {
+  const res = await fetch('/uploads/' + encodeURIComponent(filename), { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Delete failed');
+  }
+  return res.json();
+}
+
 export function videoURL(filename) {
   return '/video/' + encodeURIComponent(filename);
 }
@@ -148,6 +157,26 @@ export async function ytCut(url, clips) {
 
 export async function ytPollCut(jobId) {
   const res = await fetch('/yt-clip/cut-status/' + jobId);
+  return res.json();
+}
+
+// ── Manual Trim ────────────────────────────────────────────
+
+export async function startTrimJob(payload) {
+  const res = await fetch('/trim', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Trim request failed');
+  }
+  return res.json();
+}
+
+export async function pollTrimStatus(jobId) {
+  const res = await fetch('/trim-status/' + jobId);
   return res.json();
 }
 

@@ -61,7 +61,7 @@ export default {
     async function startAnalyze() {
       if (!canAnalyze.value) return;
       analyzeStatus.value = 'running';
-      analyzeMessage.value = 'Starting analysisâ€¦';
+      analyzeMessage.value = 'Starting analysis...';
       proposedClips.value = [];
       videoTitle.value = '';
       cutStatus.value = 'idle';
@@ -109,7 +109,7 @@ export default {
     async function startCut() {
       if (!canCut.value) return;
       cutStatus.value = 'running';
-      cutMessage.value = 'Startingâ€¦';
+      cutMessage.value = 'Starting...';
       cutProgress.value = 0;
       doneClips.value = [];
 
@@ -154,6 +154,10 @@ export default {
       }, 2000);
     }
 
+    function clipUrl(filename) {
+      return `/uploads/${encodeURIComponent(filename)}`;
+    }
+
     function goSubtitleClip(filename) {
       store.yt.prefillFile = filename;
       store.currentView = 'upload';
@@ -184,7 +188,7 @@ export default {
       selectedClips, canAnalyze, canCut,
       startAnalyze, startCut,
       toggleAll, fmtSeconds, fmtDuration,
-      goHome, goSubtitleClip, reset,
+      goHome, goSubtitleClip, clipUrl, reset,
     };
   },
 
@@ -193,8 +197,8 @@ export default {
 
   <!-- Header bar -->
   <div class="ytc-topbar">
-    <button class="btn btn-ghost ytc-back" @click="goHome">â† Back</button>
-    <h1 class="ytc-heading">ðŸŽ¬ YouTube Clip Finder</h1>
+    <button class="btn btn-ghost ytc-back" @click="goHome">&larr; Back</button>
+    <h1 class="ytc-heading">&#x1F3AC; YouTube Clip Finder</h1>
   </div>
 
   <div class="ytc-body">
@@ -217,7 +221,7 @@ export default {
         <label class="ytc-label">
           Gemini API Key
           <span class="ytc-hint-text">
-            â€” not stored anywhere, only used for this request Â·
+            &ndash; not stored anywhere, only used for this request &middot;
             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Get a free key</a>
           </span>
         </label>
@@ -225,7 +229,7 @@ export default {
           v-model="geminiKey"
           type="password"
           class="ytc-input ytc-key-input"
-          placeholder="AIzaâ€¦"
+          placeholder="AIza..."
           :disabled="analyzeStatus === 'running'"
           autocomplete="off"
         />
@@ -234,13 +238,13 @@ export default {
       <div class="ytc-field">
         <label class="ytc-label">
           What kind of clips do you want?
-          <span class="ytc-hint-text">(optional â€” leave blank to find all clippable moments)</span>
+          <span class="ytc-hint-text">(optional &ndash; leave blank to find all clippable moments)</span>
         </label>
         <textarea
           v-model="criteria"
           class="ytc-textarea"
           rows="3"
-          placeholder="e.g. funny moments, key insights, emotional moments, top 5 highlightsâ€¦"
+          placeholder="e.g. funny moments, key insights, emotional moments, top 5 highlights..."
           :disabled="analyzeStatus === 'running'"
         />
       </div>
@@ -251,7 +255,7 @@ export default {
           :disabled="!canAnalyze"
           @click="startAnalyze"
         >
-          {{ analyzeStatus === 'running' ? 'â³ Analyzingâ€¦' : 'ðŸ” Find Clips with Gemini' }}
+          {{ analyzeStatus === 'running' ? '\u23F3 Analyzing...' : '\uD83D\uDD0D Find Clips with Gemini' }}
         </button>
         <button v-if="analyzeStatus !== 'idle'" class="btn btn-ghost" @click="reset">Reset</button>
       </div>
@@ -264,7 +268,7 @@ export default {
       <p class="ytc-status-msg">{{ analyzeMessage }}</p>
     </div>
     <div v-if="analyzeStatus === 'error'" class="ytc-card ytc-status-card ytc-status--error">
-      <p>âŒ {{ analyzeMessage }}</p>
+      <p>&#x274C; {{ analyzeMessage }}</p>
     </div>
 
     <!-- Proposed clips -->
@@ -273,7 +277,7 @@ export default {
         <div>
           <h2 class="ytc-clips-title">{{ videoTitle }}</h2>
           <p class="ytc-clips-sub">
-            {{ proposedClips.length }} clip(s) found Â· video duration {{ fmtDuration(videoDuration) }}
+            {{ proposedClips.length }} clip(s) found &middot; video duration {{ fmtDuration(videoDuration) }}
           </p>
         </div>
         <div class="ytc-select-all">
@@ -297,7 +301,7 @@ export default {
             <div class="ytc-clip-top">
               <span class="ytc-clip-title">{{ clip.title }}</span>
               <span class="ytc-clip-time">
-                {{ fmtSeconds(clip.start) }} â€“ {{ fmtSeconds(clip.end) }}
+                {{ fmtSeconds(clip.start) }} &ndash; {{ fmtSeconds(clip.end) }}
                 <span class="ytc-clip-dur">({{ fmtDuration(clip.duration) }})</span>
               </span>
             </div>
@@ -313,7 +317,7 @@ export default {
           :disabled="!canCut"
           @click="startCut"
         >
-          {{ cutStatus === 'running' ? 'â³ Processingâ€¦' : 'âœ‚ Download & Cut Selected' }}
+          {{ cutStatus === 'running' ? '\u23F3 Processing...' : '\u2702 Download & Cut Selected' }}
         </button>
       </div>
     </div>
@@ -326,22 +330,43 @@ export default {
       <p class="ytc-status-msg">{{ cutMessage }}</p>
     </div>
     <div v-if="cutStatus === 'error'" class="ytc-card ytc-status-card ytc-status--error">
-      <p>âŒ {{ cutMessage }}</p>
+      <p>&#x274C; {{ cutMessage }}</p>
     </div>
 
     <!-- Done clips -->
     <div v-if="cutStatus === 'done' && doneClips.length" class="ytc-card ytc-done-card">
-      <h2 class="ytc-done-title">ðŸŽ‰ {{ doneClips.length }} clip(s) ready in uploads!</h2>
-      <div class="ytc-done-list">
-        <div v-for="clip in doneClips" :key="clip.id" class="ytc-done-item">
-          <div class="ytc-done-info">
-            <span class="ytc-done-name">{{ clip.title }}</span>
-            <span class="ytc-done-meta">{{ fmtSeconds(clip.start) }}â€“{{ fmtSeconds(clip.end) }} Â· {{ fmtDuration(clip.duration) }}</span>
-            <code class="ytc-done-file">{{ clip.filename }}</code>
+      <h2 class="ytc-done-title">&#x1F389; {{ doneClips.length }} clip(s) ready in uploads!</h2>
+      <div class="ytc-done-grid">
+        <div v-for="clip in doneClips" :key="clip.id" class="ytc-done-clip-card">
+
+          <!-- Video preview -->
+          <div class="ytc-done-video-wrap">
+            <video
+              class="ytc-done-video"
+              :src="clipUrl(clip.filename) + '#t=2'"
+              preload="metadata"
+              muted
+              playsinline
+              @mouseenter="e => e.target.play()"
+              @mouseleave="e => { e.target.pause(); e.target.currentTime = 2; }"
+            ></video>
+            <span class="ytc-done-badge">{{ fmtDuration(clip.duration) }}</span>
           </div>
-          <button class="btn btn-primary btn-sm" @click="goSubtitleClip(clip.filename)">
-            ðŸ’¬ Auto-subtitle â†’
-          </button>
+
+          <!-- Info -->
+          <div class="ytc-done-clip-body">
+            <div class="ytc-done-clip-title">{{ clip.title }}</div>
+            <div class="ytc-done-clip-time">{{ fmtSeconds(clip.start) }} &ndash; {{ fmtSeconds(clip.end) }}</div>
+            <p class="ytc-done-clip-reason">{{ clip.reason }}</p>
+          </div>
+
+          <!-- CTA -->
+          <div class="ytc-done-clip-cta">
+            <button class="btn btn-primary btn-sm ytc-done-cta-btn" @click="goSubtitleClip(clip.filename)">
+              &#x1F4AC; Auto-subtitle &rarr;
+            </button>
+          </div>
+
         </div>
       </div>
     </div>

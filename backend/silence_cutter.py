@@ -182,7 +182,13 @@ def cut_silence(
             "-f", "concat",
             "-safe", "0",
             "-i", concat_file,
-            "-c", "copy",               # copy all streams — no quality loss
+            "-c:v", "libx264",          # re-encode video to avoid keyframe/timestamp issues
+            "-crf", "18",               # high quality (visually lossless)
+            "-preset", "fast",
+            "-c:a", "aac",              # re-encode audio to fix concat timestamp issues
+            "-b:a", "192k",
+            "-avoid_negative_ts", "make_zero",  # fix negative timestamps
+            "-fflags", "+genpts",       # regenerate presentation timestamps
             "-movflags", "+faststart",  # browser-friendly MP4
             str(output_path),
         ]
@@ -220,6 +226,7 @@ def cut_silence(
         "output_path": str(output_path),
         "output_filename": output_path.name,
         "segments_kept": len(segments),
+        "segments": [[round(s, 4), round(e, 4)] for s, e in segments],
         "kept_duration_s": round(kept_duration, 2),
         "removed_duration_s": round(removed_duration, 2),
         "original_duration_s": round(duration, 2),

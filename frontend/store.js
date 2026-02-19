@@ -81,6 +81,21 @@ const store = reactive({
   transcribing: false,
   progressText: 'Transcribing…',
   progressFile: '',
+  // ── Trimmer ──────────────────────────────────
+  trimmer: {
+    inPoint: null,   // seconds | null = not set
+    outPoint: null,  // seconds | null = not set
+    active: false,
+    log: '',
+    status: '',      // '' | 'queued' | 'processing' | 'done' | 'error'
+    error: '',
+    jobId: '',
+    downloadUrl: '',
+    downloadLabel: '',
+    durationS: 0,
+    sizeMb: 0,
+  },
+
   // ── Silence cutter ────────────────────────
   silenceCutter: {
     minSilenceMs: 500,
@@ -95,13 +110,16 @@ const store = reactive({
     stats: null,  // stats object returned by backend when done
   },
 
-  // ── VTuber Reframe ─────────────────────
+  // ── Shorts Creator / VTuber Reframe ────
   reframe: {
     videoFilename: '',
-    step: 'upload',  // 'upload' | 'editor'
-    // Top section: gameplay (top 40% of output)
+    step: 'mode',    // 'mode' | 'upload' | 'editor'
+    // Shorts mode: 'vtuber' | 'zoomed' | 'blur_bg' | 'black_bg'
+    shortsMode: 'vtuber',
+    // Single-section zoom/pan (used by 'zoomed' mode)
+    single: { zoom: 1.0, panX: 0, panY: 0 },
+    // VTuber split-screen sections
     top: { zoom: 1.0, panX: 0, panY: 0 },
-    // Bottom section: avatar (bottom 60% of output)
     bottom: { zoom: 1.0, panX: 0, panY: 0 },
     render: {
       active: false,

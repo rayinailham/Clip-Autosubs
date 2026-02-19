@@ -171,18 +171,21 @@ from a video transcript. The user will tell you their criteria. You must return 
 
 Rules:
 - Each clip should be a self-contained, engaging moment.
-- Minimum clip duration: 20 seconds. Maximum: 3 minutes.
+- Minimum clip duration: 30 seconds. Maximum: 4 minutes (240 seconds).
 - Include some context before and after the key moment (a few seconds).
 - Do not overlap clips unless they represent clearly distinct highlights.
 - Return 3–15 clips unless the user specifically asks for more or fewer.
+- IMPORTANT: start and end values MUST be plain decimal numbers representing SECONDS from the
+  start of the video. For example, if a moment occurs at 25 minutes and 30 seconds,
+  return "start": 1530.0 — NOT "start": 25 or "start": "25:30".
 
 Respond ONLY with a JSON array in this exact format (no markdown, no explanation):
 [
   {
     "id": 1,
     "title": "Short descriptive title",
-    "start": 123.0,
-    "end": 187.5,
+    "start": 1530.0,
+    "end": 1620.0,
     "reason": "One sentence explaining why this is clip-worthy."
   },
   ...
@@ -248,6 +251,17 @@ Transcript (format: [HH:MM:SS] text):
     except json.JSONDecodeError as e:
         raise RuntimeError(f"Gemini returned invalid JSON: {e}\nRaw response:\n{raw[:500]}")
 
+    # ── Heuristic: detect if Gemini returned minutes instead of seconds ──────
+    # If the video is long (>5 min) but all clip timestamps are tiny (<3 min
+    # total range), Gemini likely returned minutes as if they were seconds.
+    if clips and duration > 300:
+        max_end = max(float(c.get("end", 0)) for c in clips)
+        if max_end < 180 and duration > max_end * 30:
+            # Scale all timestamps by 60
+            for c in clips:
+                c["start"] = float(c.get("start", 0)) * 60
+                c["end"]   = float(c.get("end",   0)) * 60
+
     # Validate and enrich each clip
     validated = []
     for i, clip in enumerate(clips):
@@ -258,7 +272,10 @@ Transcript (format: [HH:MM:SS] text):
             start = min(start, duration - 1)
             end = min(end, duration)
         if end <= start:
-            end = start + 30
+            end = start + 60
+        # Enforce minimum clip length of 30 seconds
+        if end - start < 30:
+            end = start + 60
         validated.append({
             "id": clip.get("id", i + 1),
             "title": clip.get("title", f"Clip {i+1}"),

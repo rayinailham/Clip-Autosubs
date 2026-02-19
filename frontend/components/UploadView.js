@@ -1,6 +1,6 @@
 import { ref, onMounted } from 'vue';
 import store, { regenerateAutoGroups } from '../store.js';
-import { fetchUploads, uploadAndTranscribe, transcribeExistingFile, loadTranscriptionJSON, videoURL } from '../api.js';
+import { fetchUploads, uploadAndTranscribe, transcribeExistingFile, loadTranscriptionJSON, videoURL, deleteUpload } from '../api.js';
 
 export default {
   name: 'UploadView',
@@ -102,10 +102,21 @@ export default {
       }
     });
 
+    async function deleteFile(filename) {
+      if (!confirm(`Delete "${filename}"?\nThis will also remove its transcription if one exists.`)) return;
+      try {
+        await deleteUpload(filename);
+        await loadPreviousUploads();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    }
+
     return {
       store, uploads, uploadsLoading, dragover,
       onFileChange, onDrop, onDragover, onDragleave,
       loadExisting, transcribeExisting, loadPreviousUploads,
+      deleteFile, videoURL,
     };
   },
   template: `
@@ -155,24 +166,39 @@ export default {
           <div v-if="uploadsLoading" class="uploads-loading">Loading…</div>
           <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
           <div v-else v-for="f in uploads" :key="f.filename" class="upload-item">
-            <div class="upload-item-icon">🎬</div>
-            <div class="upload-item-info">
+            <div class="upload-item-thumb">
+              <video
+                :src="videoURL(f.filename)"
+                preload="metadata"
+                muted
+                playsinline
+                class="upload-item-video"
+                @loadedmetadata="e => { e.target.currentTime = 1 }"
+                @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
+                @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
+              ></video>
+            </div>
+            <div class="upload-item-body">
               <div class="upload-item-name" :title="f.filename">{{ f.filename }}</div>
               <div class="upload-item-meta">
                 {{ f.size_mb }} MB
                 <span v-if="f.has_transcription" class="upload-badge transcribed">✓ Transcribed</span>
                 <span v-else class="upload-badge">Not transcribed</span>
               </div>
-            </div>
-            <div class="upload-item-action">
-              <button v-if="f.has_transcription" class="btn btn-primary btn-sm"
-                      @click="loadExisting(encodeURIComponent(f.filename), encodeURIComponent(f.transcription_file))">
-                Open ▶
-              </button>
-              <button v-else class="btn btn-outline btn-sm"
-                      @click="transcribeExisting(encodeURIComponent(f.filename))">
-                Transcribe
-              </button>
+              <div class="upload-item-action">
+                <button v-if="f.has_transcription" class="btn btn-primary btn-sm"
+                        @click="loadExisting(encodeURIComponent(f.filename), encodeURIComponent(f.transcription_file))">
+                  Open ▶
+                </button>
+                <button v-else class="btn btn-outline btn-sm"
+                        @click="transcribeExisting(encodeURIComponent(f.filename))">
+                  Transcribe
+                </button>
+                <button class="btn btn-ghost btn-sm btn-delete" :title="'Delete ' + f.filename"
+                        @click.stop="deleteFile(f.filename)">
+                  🗑
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -2,11 +2,12 @@ import { ref } from 'vue';
 import TranscriptPanel from './TranscriptPanel.js';
 import GroupsSidebar from './GroupsSidebar.js';
 import SilenceCutterPanel from './SilenceCutterPanel.js';
+import TrimPanel from './TrimPanel.js';
 import store, { regenerateAutoGroups } from '../store.js';
 
 export default {
   name: 'LeftSidebar',
-  components: { TranscriptPanel, GroupsSidebar, SilenceCutterPanel },
+  components: { TranscriptPanel, GroupsSidebar, SilenceCutterPanel, TrimPanel },
   emits: ['seek'],
   setup(_, { emit }) {
     const activeTab = ref('transcript');
@@ -37,8 +38,11 @@ export default {
         <button class="sidebar-tab" :class="{ active: activeTab === 'groups' }" @click="switchTab('groups')">
           📦 Groups
         </button>
+        <button class="sidebar-tab" :class="{ active: activeTab === 'trim' }" @click="switchTab('trim')">
+          ✂ Trim
+        </button>
         <button class="sidebar-tab" :class="{ active: activeTab === 'silence' }" @click="switchTab('silence')">
-          ✂️ Silence
+          🔇 Silence
         </button>
       </div>
       <div class="left-sidebar-content">
@@ -47,6 +51,9 @@ export default {
         </div>
         <div class="left-tab-pane groups-panel" v-show="activeTab === 'groups'">
           <GroupsSidebar />
+        </div>
+        <div class="left-tab-pane" v-show="activeTab === 'trim'">
+          <TrimPanel @seek="handleSeek" />
         </div>
         <div class="left-tab-pane" v-show="activeTab === 'silence'">
           <SilenceCutterPanel />

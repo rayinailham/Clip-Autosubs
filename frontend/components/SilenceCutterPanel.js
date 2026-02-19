@@ -9,6 +9,34 @@ import { computed } from 'vue';
 import store from '../store.js';
 import { startCutSilenceJob, pollCutSilenceStatus } from '../api.js';
 
+// ── Remap word timestamps to new silence-cut timeline ────────────────────────
+function remapTime(t, segments) {
+  let offset = 0;
+  for (const [s, e] of segments) {
+    if (t <= e) {
+      if (t >= s) return offset + (t - s);
+      return offset; // t was in a silent gap — clamp to segment start
+    }
+    offset += e - s;
+  }
+  return offset; // after last segment
+}
+
+function remapWords(words, segments) {
+  return words.map(w => ({
+    ...w,
+    start: parseFloat(remapTime(w.start, segments).toFixed(4)),
+    end:   parseFloat(remapTime(w.end,   segments).toFixed(4)),
+  }));
+}
+
+function applyToEditor(filename, segments) {
+  if (segments && segments.length > 0) {
+    store.words = remapWords(store.words, segments);
+  }
+  store.videoFilename = filename;
+}
+
 let _pollTimer = null;
 
 function stopPoll() {
@@ -67,6 +95,8 @@ export default {
                 segments: data.segments_kept,
                 sizeMb:   data.size_mb,
               };
+              // Apply the cut video as the active editor video
+              if (data.filename) applyToEditor(data.filename, data.segments);
             } else if (data.status === 'error') {
               stopPoll();
               s.active = false;

@@ -241,6 +241,14 @@ export default {
       }
     });
 
+    // Reload video when the filename changes (e.g. after silence cutting)
+    watch(() => store.videoFilename, (filename) => {
+      if (filename && videoEl.value && store.currentView === 'editor') {
+        videoEl.value.src = videoURL(filename);
+        videoEl.value.load();
+      }
+    });
+
     // Reset group key so the first group re-animates after a mode switch
     watch(() => store.useDynamicMode, () => { lastGroupKey = null; });
 
