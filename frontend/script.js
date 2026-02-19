@@ -43,6 +43,8 @@ const controls = {
   position: $('#ctrl-position'),
   marginV: $('#ctrl-marginv'),
   marginH: $('#ctrl-marginh'),
+  letterSpacing: $('#ctrl-letterspacing'),
+  wordGap: $('#ctrl-wordgap'),
   wpg: $('#ctrl-wpg'),
 };
 
@@ -56,6 +58,8 @@ setupRangeDisplay(controls.shadow, $('#val-shadow'));
 setupRangeDisplay(controls.scale, $('#val-scale'));
 setupRangeDisplay(controls.marginV, $('#val-marginv'));
 setupRangeDisplay(controls.marginH, $('#val-marginh'));
+setupRangeDisplay(controls.letterSpacing, $('#val-letterspacing'));
+setupRangeDisplay(controls.wordGap, $('#val-wordgap'));
 setupRangeDisplay(controls.wpg, $('#val-wpg'));
 
 // Update preview on control change
@@ -98,6 +102,7 @@ function newTranscription() {
   currentWords = [];
   customGroups = [];
   selectedWordIndices.clear();
+  loadPreviousUploads();
 }
 
 // ── Status check ──────────────────────────────────
@@ -122,6 +127,89 @@ async function checkStatus() {
   }
 }
 checkStatus();
+loadPreviousUploads();
+
+// ── Previous Uploads ──────────────────────────────
+async function loadPreviousUploads() {
+  const container = $('#uploads-list');
+  if (!container) return;
+  container.innerHTML = '<div class="uploads-loading">Loading…</div>';
+  try {
+    const res = await fetch('/uploads');
+    const data = await res.json();
+    const files = data.files || [];
+
+    if (files.length === 0) {
+      container.innerHTML = '<div class="uploads-empty">No previous uploads found.</div>';
+      return;
+    }
+
+    container.innerHTML = files.map(f => {
+      const safeName = f.filename.replace(/"/g, '&quot;');
+      const safeJson = f.transcription_file ? f.transcription_file.replace(/"/g, '&quot;') : '';
+      const badge = f.has_transcription
+        ? '<span class="upload-badge transcribed">✓ Transcribed</span>'
+        : '<span class="upload-badge">Not transcribed</span>';
+      const action = f.has_transcription
+        ? `<button class="btn btn-primary btn-sm" onclick="loadExistingTranscription('${encodeURIComponent(f.filename)}','${encodeURIComponent(f.transcription_file)}')">Open ▶</button>`
+        : `<button class="btn btn-outline btn-sm" onclick="transcribeExisting('${encodeURIComponent(f.filename)}')">Transcribe</button>`;
+      return `
+        <div class="upload-item">
+          <div class="upload-item-icon">🎬</div>
+          <div class="upload-item-info">
+            <div class="upload-item-name" title="${safeName}">${safeName}</div>
+            <div class="upload-item-meta">${f.size_mb} MB ${badge}</div>
+          </div>
+          <div class="upload-item-action">${action}</div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="uploads-empty">Could not load uploads.</div>';
+  }
+}
+
+async function loadExistingTranscription(encodedVideo, encodedJson) {
+  try {
+    const res = await fetch('/outputs/' + encodedJson);
+    if (!res.ok) throw new Error('Transcription file not found');
+    const result = await res.json();
+    currentWords = result.words || [];
+    currentMetadata = result.metadata || {};
+    currentVideoFilename = decodeURIComponent(encodedVideo);
+    openEditor();
+  } catch (e) {
+    alert('Failed to load transcription: ' + e.message);
+  }
+}
+
+async function transcribeExisting(encodedFilename) {
+  const filename = decodeURIComponent(encodedFilename);
+  uploadCard.classList.add('disabled');
+  transcribeBar.classList.add('active');
+  progressText.textContent = 'Transcribing…';
+  progressFile.textContent = filename;
+  try {
+    const res = await fetch('/transcribe-existing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Transcription failed');
+    }
+    const result = await res.json();
+    currentWords = result.words || [];
+    currentMetadata = result.metadata || {};
+    currentVideoFilename = filename;
+    openEditor();
+  } catch (err) {
+    alert('Error: ' + err.message);
+    uploadCard.classList.remove('disabled');
+    transcribeBar.classList.remove('active');
+    loadPreviousUploads();
+  }
+}
 
 // ── Upload & Transcribe ───────────────────────────
 uploadCard.addEventListener('dragover', e => {
@@ -493,6 +581,7 @@ function regenerateAutoGroups() {
     });
   }
   renderGroups();
+  renderTranscript();
 }
 
 function autoGenerateGroups() {
@@ -547,6 +636,7 @@ function splitGroup(groupIdx) {
     { word_indices: secondHalf, start: secondStart, end: group.end }
   );
   renderGroups();
+  renderTranscript();
 }
 
 function mergeWithNext(groupIdx) {
@@ -561,6 +651,7 @@ function mergeWithNext(groupIdx) {
     end: g2.end,
   });
   renderGroups();
+  renderTranscript();
 }
 
 // ── Subtitle preview sync ─────────────────────────
@@ -638,6 +729,8 @@ function onTimeUpdate() {
   // Render overlay
   subtitlePreview.style.fontSize = scaledFontSize;
   subtitlePreview.style.fontFamily = fontFamily + ', Impact, sans-serif';
+  subtitlePreview.style.letterSpacing = (parseInt(controls.letterSpacing.value) || 0) + 'px';
+  subtitlePreview.style.wordSpacing = (parseInt(controls.wordGap.value) || 0) * 4 + 'px';
 
   // Scale margin_v proportionally so bottom position matches rendered output
   const marginVASS = parseInt(controls.marginV.value) || 60;
@@ -703,6 +796,8 @@ function getStyleConfig() {
     position: controls.position.value,
     margin_v: parseInt(controls.marginV.value) || 60,
     margin_h: parseInt(controls.marginH.value) || 10,
+    letter_spacing: parseInt(controls.letterSpacing.value) || 0,
+    word_gap: parseInt(controls.wordGap.value) || 0,
     scale_highlight: parseInt(controls.scale.value) || 115,
     animation: controls.animation.value,
     uppercase: controls.uppercase.checked,

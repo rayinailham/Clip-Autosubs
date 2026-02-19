@@ -115,6 +115,8 @@ def generate_ass(
     position: str = "bottom",
     margin_v: int = 60,
     margin_h: int = 10,
+    letter_spacing: int = 0,
+    word_gap: int = 0,
     scale_highlight: int = 115,
     animation: str = "scale",
     uppercase: bool = True,
@@ -165,7 +167,7 @@ def generate_ass(
         "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
         "Alignment, MarginL, MarginR, MarginV, Encoding\n"
         f"Style: Default,{font_name},{font_size},{normal_ass},&H000000FF,"
-        f"{outline_ass},{shadow_ass},{bold_flag},{italic_flag},0,0,100,100,0,0,1,"
+        f"{outline_ass},{shadow_ass},{bold_flag},{italic_flag},0,0,100,100,{letter_spacing},0,1,"
         f"{outline_width},{shadow_depth},{alignment},{margin_h},{margin_h},{actual_margin_v},1\n"
         "\n"
         "[Events]\n"
@@ -255,7 +257,9 @@ def generate_ass(
                 tag_str = "".join(tags)
                 parts.append(f"{{{tag_str}}}{text}{{\\r}}")
 
-            line_text = " ".join(parts)
+            # Join words with optional extra hard spaces for word gap
+            hard_spaces = '\\h' * word_gap
+            line_text = (' ' + hard_spaces).join(parts)
             start_str = format_ass_time(word_start)
             end_str = format_ass_time(word_end)
 

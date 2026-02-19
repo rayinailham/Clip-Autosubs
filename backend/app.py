@@ -106,12 +106,20 @@ class StyleConfig(BaseModel):
     position: str = "bottom"  # top, center, bottom
     margin_v: int = 60  # Vertical margin
     margin_h: int = 10  # Horizontal margin
-    
+
+    # Spacing
+    letter_spacing: int = 0   # Character spacing (ASS \sp / Style Spacing)
+    word_gap: int = 0         # Extra hard spaces between words
+
     # Animation
     animation: str = "scale"  # none, scale, fade, bounce
     
     # Text transform
     uppercase: bool = True
+
+
+class TranscribeExistingRequest(BaseModel):
+    filename: str
 
 
 class RenderRequest(BaseModel):
@@ -249,6 +257,8 @@ def _do_render(render_id: str, req: RenderRequest):
             position=req.style.position,
             margin_v=req.style.margin_v,
             margin_h=req.style.margin_h,
+            letter_spacing=req.style.letter_spacing,
+            word_gap=req.style.word_gap,
             scale_highlight=req.style.scale_highlight,
             animation=req.style.animation,
             uppercase=req.style.uppercase,
@@ -315,6 +325,48 @@ async def list_rendered():
                 "url": f"/rendered/{f.name}",
             })
     return {"files": files}
+
+
+# ─── Uploads listing ────────────────────────────────────────
+
+@app.get("/uploads")
+async def list_uploads():
+    """List all uploaded video/audio files with their transcription status."""
+    files = []
+    for f in UPLOAD_DIR.iterdir():
+        if f.is_file() and f.suffix.lower() in ALLOWED_EXTENSIONS:
+            transcription_json = OUTPUT_DIR / (f.stem + "_transcription.json")
+            has_transcription = transcription_json.exists()
+            files.append({
+                "filename": f.name,
+                "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+                "has_transcription": has_transcription,
+                "transcription_file": (f.stem + "_transcription.json") if has_transcription else None,
+            })
+    files.sort(key=lambda x: x["filename"])
+    return {"files": files}
+
+
+@app.post("/transcribe-existing")
+async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
+    """Transcribe an already-uploaded file without re-uploading it."""
+    filename = payload.filename.strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="filename is required")
+    upload_path = UPLOAD_DIR / filename
+    if not upload_path.exists():
+        raise HTTPException(status_code=404, detail=f"Uploaded file not found: {filename}")
+
+    ext = upload_path.suffix.lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
+
+    try:
+        result = transcribe_video(str(upload_path), str(OUTPUT_DIR))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+    return result
 
 
 # ─── Outputs (JSON) ─────────────────────────────────────────

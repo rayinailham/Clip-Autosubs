@@ -4,6 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Clipping Project — Dynamic Subtitles</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -25,12 +28,18 @@
 
 <!-- ═══ Upload View ═══ -->
 <div id="upload-view" class="view active">
+  <div class="upload-hero">
+    <h2>Subtitle your clips in seconds</h2>
+    <p>Drop a video or audio file to auto-transcribe and style dynamic subtitles</p>
+  </div>
+  <div class="upload-card-wrap">
   <div class="upload-card" id="upload-card">
     <input type="file" id="file-input"
            accept=".mp4,.mkv,.avi,.mov,.webm,.mp3,.wav,.flac,.m4a,.ogg" />
-    <div class="upload-icon">🎬</div>
+    <span class="upload-icon">🎬</span>
     <h2>Drop a video or audio file</h2>
-    <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV — up to 500 MB</p>
+    <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV &mdash; up to 500 MB</p>
+  </div>
   </div>
   <div class="transcribe-progress" id="transcribe-progress">
     <div class="progress-box">
@@ -41,6 +50,17 @@
       <div class="progress-track">
         <div class="progress-fill"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Previously Uploaded Files -->
+  <div class="previous-uploads" id="previous-uploads">
+    <div class="prev-uploads-header">
+      <h3>Previously Uploaded</h3>
+      <button class="btn btn-outline btn-sm" onclick="loadPreviousUploads()">↻ Refresh</button>
+    </div>
+    <div id="uploads-list" class="uploads-list">
+      <div class="uploads-loading">Loading…</div>
     </div>
   </div>
 </div>
@@ -172,6 +192,21 @@
             </select>
           </div>
         </div>
+
+        <!-- Spacing Section -->
+        <div class="style-section">
+          <div class="style-section-title">Spacing</div>
+          <div class="style-row">
+            <label>Letter Spc</label>
+            <input type="range" min="0" max="20" value="0" id="ctrl-letterspacing" />
+            <span class="range-val" id="val-letterspacing">0</span>
+          </div>
+          <div class="style-row">
+            <label>Word Gap</label>
+            <input type="range" min="0" max="8" value="0" id="ctrl-wordgap" />
+            <span class="range-val" id="val-wordgap">0</span>
+          </div>
+        </div>
         
         <!-- Position Section -->
         <div class="style-section">
@@ -280,6 +315,6 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════ -->
-<script src="script.js"></script>
+<script src="script.js?v=2"></script>
 </body>
 </html>
