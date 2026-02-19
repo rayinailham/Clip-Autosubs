@@ -1,3 +1,18 @@
+/* ── CSS Modules (new modular structure) ─────── */
+@import './styles/base.css';
+@import './styles/header.css';
+@import './styles/upload.css';
+@import './styles/editor.css';
+@import './styles/transcript.css';
+@import './styles/sidebar.css';
+@import './styles/buttons.css';
+@import './styles/overlay.css';
+
+/* ═══════════════════════════════════════════════
+   LEGACY — kept purely as fallback during migration.
+   The split CSS files in styles/ are the source of
+   truth. This block will be removed once verified.
+   ═══════════════════════════════════════════════ */
     /* ── Base ─────────────────────────────────────── */
     :root {
       --bg: #0a0a10;

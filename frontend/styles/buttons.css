@@ -1,0 +1,45 @@
+/* ── Bottom Bar ──────────────────────────────── */
+.bottom-bar {
+  grid-column: 1 / -1;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+/* ── Buttons ─────────────────────────────────── */
+.btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #5b42d4);
+  color: #fff;
+  box-shadow: 0 2px 12px rgba(124,92,252,0.35);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--accent-hover), #6a50e8);
+  box-shadow: 0 4px 20px rgba(124,92,252,0.5);
+  transform: translateY(-1px);
+}
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-success { background: var(--success); color: #0f0f13; }
+.btn-success:hover { filter: brightness(1.1); }
+.btn-outline {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.1);
+  color: var(--text-dim);
+}
+.btn-outline:hover { border-color: var(--accent); color: var(--text); background: var(--accent-dim); }
+.btn-sm { padding: 5px 12px; font-size: 0.7rem; }
