@@ -474,7 +474,13 @@ def _seconds_to_ffmpeg_ts(secs: float) -> str:
     return f"{hh:02d}:{mm:02d}:{ss:06.3f}"
 
 
-def download_video(url: str, output_dir: Path, progress_cb=None) -> Path:
+def download_video(
+    url: str, 
+    output_dir: Path, 
+    progress_cb=None,
+    clip_range: Optional[tuple[float, float]] = None,
+    filename_stem: Optional[str] = None
+) -> Path:
     """
     Download the best-quality MP4 (up to 1080p) using yt-dlp.
     Returns the path to the downloaded file.
@@ -483,8 +489,11 @@ def download_video(url: str, output_dir: Path, progress_cb=None) -> Path:
         raise RuntimeError("yt-dlp is not installed. Run: pip install yt-dlp")
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    video_id = _extract_video_id(url)
+    stem = filename_stem if filename_stem else f"{video_id}_source"
+
     # Use a fixed output template so we know the filename
-    outtmpl = str(output_dir / "%(id)s_source.%(ext)s")
+    outtmpl = str(output_dir / f"{stem}.%(ext)s")
 
     class _ProgressHook:
         def __call__(self, d):
@@ -504,13 +513,19 @@ def download_video(url: str, output_dir: Path, progress_cb=None) -> Path:
                 "quiet": True,
                 "no_warnings": True,
                 "progress_hooks": [_ProgressHook()],
+                "concurrent_fragment_downloads": 5,
+                "continuedl": True,
             }
+            if clip_range:
+                from yt_dlp.utils import download_range_func
+                ydl_opts["download_ranges"] = download_range_func(None, [clip_range])
+                ydl_opts["force_keyframes_at_cuts"] = True
+
             if use_cookies:
                 ydl_opts["cookiesfrombrowser"] = ["chrome"]
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
-                video_id = info["id"]
                 break # Success!
         except Exception as e:
             err_msg = str(e)
@@ -530,9 +545,9 @@ def download_video(url: str, output_dir: Path, progress_cb=None) -> Path:
                 raise RuntimeError(f"Video download failed: {e}")
 
     # Find the downloaded file
-    matches = list(output_dir.glob(f"{video_id}_source.*"))
+    matches = [p for p in output_dir.iterdir() if p.stem == stem]
     if not matches:
-        raise RuntimeError("Downloaded file not found after yt-dlp finished.")
+        raise RuntimeError(f"Downloaded file not found after yt-dlp finished (expected stem: {stem}).")
     return matches[0]
 
 
@@ -576,103 +591,89 @@ def download_and_cut_clips(
     progress_cb=None,
 ) -> list[dict]:
     """
-    Full pipeline: download video → cut each clip → save to uploads_dir.
+    Full pipeline: download directly to clip sections → save to uploads_dir.
 
     Args:
         url: YouTube URL
         clips: list of [{id, title, start, end, ...}]
         uploads_dir: destination folder for cut clips
-        tmp_dir: temp folder for the full download (cleaned up after)
+        tmp_dir: unused
         progress_cb: callable(stage: str, pct: int) for progress updates
 
     Returns:
         list of [{id, title, start, end, filename, filepath}]
     """
-    use_tmp = tmp_dir is None
-    if use_tmp:
-        _tmp = tempfile.mkdtemp(prefix="yt_clipper_")
-        tmp_path = Path(_tmp)
-    else:
-        tmp_path = tmp_dir
-        tmp_path.mkdir(parents=True, exist_ok=True)
+    # Extract video ID for folder name
+    video_id = _extract_video_id(url)
+    folder_name = f"yt_{video_id}" if video_id else "yt_unknown"
+    folder_path = uploads_dir / folder_name
+    folder_path.mkdir(parents=True, exist_ok=True)
 
+    # Stage 1.5: Extract full transcript for the whole video
+    yt_transcript = None
     try:
-        # Stage 1: Download
-        if progress_cb:
-            progress_cb("downloading", 0)
+        print("[yt-clipper] Extracting reference transcript for clips…")
+        yt_transcript = extract_transcript(url)
+    except Exception as e:
+        print(f"[yt-clipper] Warning: Could not extract reference transcript: {e}")
+
+    if progress_cb:
+        progress_cb("cutting", 0)
+
+    # Stage 2: Cut clips directly via download
+    results = []
+    total_clips = len(clips)
+    for i, clip in enumerate(clips):
+        safe_title = re.sub(r'[<>:"/\\|?*]', "", clip["title"])[:50].strip()
+        safe_title = re.sub(r"\s+", "_", safe_title)
+        filename_stem = f"yt_{clip['id']:02d}_{safe_title}"
 
         def _dl_progress(pct):
             if progress_cb:
-                progress_cb("downloading", pct)
+                overall_pct = int(((i + (pct / 100)) / total_clips) * 100)
+                progress_cb("downloading & cutting", overall_pct)
 
-        source_file = download_video(url, tmp_path, progress_cb=_dl_progress)
+        print(f"[yt-clipper] Downloading clip section: {clip['start']}s - {clip['end']}s into {filename_stem}")
+        out_path = download_video(
+            url,
+            folder_path,
+            progress_cb=_dl_progress,
+            clip_range=(clip["start"], clip["end"]),
+            filename_stem=filename_stem
+        )
 
-        # Extract video ID for folder name
-        video_id = _extract_video_id(url)
-        folder_name = f"yt_{video_id}" if video_id else "yt_unknown"
-        folder_path = uploads_dir / folder_name
-        folder_path.mkdir(parents=True, exist_ok=True)
+        filename = out_path.name
 
-        # Stage 1.5: Extract full transcript for the whole video (to split for clips later)
-        # This will be used as a "reference" for the Refine stage.
-        yt_transcript = None
-        try:
-            print("[yt-clipper] Extracting reference transcript for clips…")
-            yt_transcript = extract_transcript(url)
-        except Exception as e:
-            print(f"[yt-clipper] Warning: Could not extract reference transcript: {e}")
+        # Save reference YouTube captions for this specific clip (if available)
+        if yt_transcript and yt_transcript.get("segments"):
+            clip_start = clip["start"]
+            clip_end = clip["end"]
+            clip_segments = []
+            for seg in yt_transcript["segments"]:
+                if seg["start"] < clip_end and seg["end"] > clip_start:
+                    shifted = {
+                        "start": round(max(0, seg["start"] - clip_start), 3),
+                        "end": round(seg["end"] - clip_start, 3),
+                        "text": seg["text"]
+                    }
+                    clip_segments.append(shifted)
+            
+            if clip_segments:
+                cap_path = out_path.with_suffix(".yt_captions.json")
+                with open(cap_path, "w", encoding="utf-8") as f:
+                    json.dump({"segments": clip_segments}, f, indent=2, ensure_ascii=False)
+                print(f"[yt-clipper] Saved reference captions: {cap_path.name}")
+
+        results.append({
+            "id": clip["id"],
+            "title": clip["title"],
+            "start": clip["start"],
+            "end": clip["end"],
+            "duration": clip.get("duration", round(clip["end"] - clip["start"], 2)),
+            "filename": f"{folder_name}/{filename}",
+        })
 
         if progress_cb:
-            progress_cb("cutting", 0)
+            progress_cb("cutting", int((i + 1) / total_clips * 100))
 
-        # Stage 2: Cut clips
-        results = []
-        for i, clip in enumerate(clips):
-            # Build safe filename from title
-            safe_title = re.sub(r'[<>:"/\\|?*]', "", clip["title"])[:50].strip()
-            safe_title = re.sub(r"\s+", "_", safe_title)
-            filename = f"yt_{clip['id']:02d}_{safe_title}.mp4"
-            out_path = folder_path / filename
-
-            cut_clip(source_file, clip["start"], clip["end"], out_path)
-
-            # Save reference YouTube captions for this specific clip (if available)
-            if yt_transcript and yt_transcript.get("segments"):
-                clip_start = clip["start"]
-                clip_end = clip["end"]
-                # Filter segments that overlap with this clip
-                clip_segments = []
-                for seg in yt_transcript["segments"]:
-                    if seg["start"] < clip_end and seg["end"] > clip_start:
-                        # Offset segment times to start from 0 for this clip
-                        shifted = {
-                            "start": round(max(0, seg["start"] - clip_start), 3),
-                            "end": round(seg["end"] - clip_start, 3),
-                            "text": seg["text"]
-                        }
-                        clip_segments.append(shifted)
-                
-                if clip_segments:
-                    cap_path = out_path.with_suffix(".yt_captions.json")
-                    with open(cap_path, "w", encoding="utf-8") as f:
-                        json.dump({"segments": clip_segments}, f, indent=2, ensure_ascii=False)
-                    print(f"[yt-clipper] Saved reference captions: {cap_path.name}")
-
-            results.append({
-                "id": clip["id"],
-                "title": clip["title"],
-                "start": clip["start"],
-                "end": clip["end"],
-                "duration": clip.get("duration", round(clip["end"] - clip["start"], 2)),
-                "filename": f"{folder_name}/{filename}",
-            })
-
-            if progress_cb:
-                progress_cb("cutting", int((i + 1) / len(clips) * 100))
-
-        return results
-
-    finally:
-        if use_tmp:
-            import shutil
-            shutil.rmtree(_tmp, ignore_errors=True)
+    return results

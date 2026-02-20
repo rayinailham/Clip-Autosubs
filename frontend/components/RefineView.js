@@ -18,6 +18,10 @@ export default {
     const pollTimer = ref(null);
     const sortMode = ref('newest');
 
+    const doCutSilence = ref(true);
+    const doLlmFilter = ref(true);
+    const doGrouping = ref(true);
+
     const processedUploads = computed(() => {
       let list = [...uploads.value];
       if (sortMode.value === 'newest') list.sort((a,b) => (b.created_at || 0) - (a.created_at || 0));
@@ -139,7 +143,10 @@ export default {
         const { job_id } = await startRefineJob({
           video_filename: filename,
           gemini_api_key: apiKey.value.trim(),
-          transcription_model: store.transcriptionModel
+          transcription_model: store.transcriptionModel,
+          do_cut_silence: doCutSilence.value,
+          do_llm_filter: doLlmFilter.value,
+          do_grouping: doGrouping.value
         });
         store.refine.jobId = job_id;
         startPolling(job_id);
@@ -277,6 +284,7 @@ export default {
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads,
+      doCutSilence, doLlmFilter, doGrouping,
     };
   },
   template: `
@@ -334,6 +342,25 @@ export default {
             <input type="password" v-model="apiKey"
                    placeholder="Paste your Google Gemini API key…"
                    style="width: 100%; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 0.8rem; outline: none; font-family: monospace;" />
+          </div>
+        </div>
+
+        <!-- Options Checklist -->
+        <div class="refine-options" style="max-width: 560px; width: 100%; margin-top: 1rem; background: var(--surface); padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+          <h3 style="font-size: 0.9rem; margin-bottom: 0.8rem; color: var(--text-dim);">⚙️ Refinement Options</h3>
+          <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" v-model="doCutSilence" />
+              <span><strong>Cut Silences:</strong> Automatically remove awkward pauses and long gaps.</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" v-model="doLlmFilter" />
+              <span><strong>LLM Filtering (AI):</strong> Remove excessive rambling and hide overlapping speakers.</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" v-model="doGrouping" />
+              <span><strong>Proper Subtitling (AI):</strong> Group words into natural, easy-to-read subtitle chunks based on sentence boundaries.</span>
+            </label>
           </div>
         </div>
 

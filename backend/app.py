@@ -216,6 +216,9 @@ class RefineRequest(BaseModel):
     transcription_model: Optional[str] = "large-v2"
     min_silence_ms: int = 500
     padding_ms: int = 100
+    do_cut_silence: bool = True
+    do_llm_filter: bool = True
+    do_grouping: bool = True
 
 
 class YtAnalyzeRequest(BaseModel):
@@ -1131,6 +1134,9 @@ def _do_refine(job_id: str, req: RefineRequest):
             transcription_model=req.transcription_model,
             min_silence_ms=req.min_silence_ms,
             padding_ms=req.padding_ms,
+            do_cut_silence=req.do_cut_silence,
+            do_llm_filter=req.do_llm_filter,
+            do_grouping=req.do_grouping,
             progress_cb=progress,
         )
 

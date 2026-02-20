@@ -297,6 +297,9 @@ def refine_video(
     transcription_model: str = "large-v2",
     min_silence_ms: int = 500,
     padding_ms: int = 100,
+    do_cut_silence: bool = True,
+    do_llm_filter: bool = True,
+    do_grouping: bool = True,
     progress_cb: Optional[Callable[[str, str], None]] = None,
 ) -> dict:
     """
@@ -353,24 +356,38 @@ def refine_video(
     output_filename = f"{video_path.stem}_refined_{job_id}.mp4"
     output_path = Path(rendered_dir) / output_filename
 
-    stats = cut_silence(
-        video_path=str(video_path),
-        words=words,
-        output_path=str(output_path),
-        min_silence_ms=min_silence_ms,
-        padding_ms=padding_ms,
-        progress_cb=lambda msg: log("silence", msg),
-    )
+    if do_cut_silence:
+        stats = cut_silence(
+            video_path=str(video_path),
+            words=words,
+            output_path=str(output_path),
+            min_silence_ms=min_silence_ms,
+            padding_ms=padding_ms,
+            progress_cb=lambda msg: log("silence", msg),
+        )
 
-    # Adjust timestamps to match the silence-cut output
-    kept_segments = [(s[0], s[1]) for s in stats["segments"]]
-    adjusted_words = adjust_timestamps(words, kept_segments)
+        # Adjust timestamps to match the silence-cut output
+        kept_segments = [(s[0], s[1]) for s in stats["segments"]]
+        adjusted_words = adjust_timestamps(words, kept_segments)
 
-    log(
-        "silence",
-        f"Done — {stats['removed_duration_s']}s removed, "
-        f"{len(adjusted_words)} words remain",
-    )
+        log(
+            "silence",
+            f"Done — {stats['removed_duration_s']}s removed, "
+            f"{len(adjusted_words)} words remain",
+        )
+    else:
+        log("silence", "Skipping silence cutting")
+        output_filename = video_path.name
+        adjusted_words = words
+        duration = metadata.get("duration", 0)
+        if not duration and words:
+            duration = words[-1]["end"]
+        stats = {
+            "original_duration_s": duration,
+            "kept_duration_s": duration,
+            "removed_duration_s": 0,
+            "segments_kept": 1,
+        }
 
     # ── Step 3: Check for reference captions (Optional) ──────
     reference_text = None
@@ -412,9 +429,12 @@ def refine_video(
     # ── Step 4: Gemini analysis ─────────────────────────────
     log("analyze", "Sending transcript to Gemini AI…")
 
-    analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text)
-
-    log("analyze", "Gemini analysis complete")
+    if do_llm_filter or do_grouping:
+        analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text)
+        log("analyze", "Gemini analysis complete")
+    else:
+        analysis = {}
+        log("analyze", "Skipping Gemini analysis")
 
     # ── Step 4: Apply results ───────────────────────────────
     log("apply", "Applying refinements…")
@@ -436,29 +456,31 @@ def refine_video(
 
     # 4b — Hidden (overlapping, less-important words)
     hidden_indices = []
-    for r in analysis.get("hidden_word_ranges", []):
-        if isinstance(r, dict):
-            start_idx = r.get("start_index", r.get("word_index_start"))
-            end_idx = r.get("end_index", r.get("word_index_end"))
-            if start_idx is not None and end_idx is not None:
-                hidden_indices.extend(range(start_idx, end_idx + 1))
-        elif isinstance(r, (list, tuple)) and len(r) >= 2:
-            hidden_indices.extend(range(r[0], r[1] + 1))
-    hidden_indices.extend(analysis.get("hidden_word_indices", []))
-    hidden_indices = [i for i in hidden_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
+    if do_llm_filter:
+        for r in analysis.get("hidden_word_ranges", []):
+            if isinstance(r, dict):
+                start_idx = r.get("start_index", r.get("word_index_start"))
+                end_idx = r.get("end_index", r.get("word_index_end"))
+                if start_idx is not None and end_idx is not None:
+                    hidden_indices.extend(range(start_idx, end_idx + 1))
+            elif isinstance(r, (list, tuple)) and len(r) >= 2:
+                hidden_indices.extend(range(r[0], r[1] + 1))
+        hidden_indices.extend(analysis.get("hidden_word_indices", []))
+        hidden_indices = [i for i in hidden_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
 
     # 4c — Wasted (rambling, unnecessary words)
     wasted_indices = []
-    for r in analysis.get("wasted_word_ranges", []):
-        if isinstance(r, dict):
-            start_idx = r.get("start_index", r.get("word_index_start"))
-            end_idx = r.get("end_index", r.get("word_index_end"))
-            if start_idx is not None and end_idx is not None:
-                wasted_indices.extend(range(start_idx, end_idx + 1))
-        elif isinstance(r, (list, tuple)) and len(r) >= 2:
-            wasted_indices.extend(range(r[0], r[1] + 1))
-    wasted_indices.extend(analysis.get("wasted_word_indices", []))
-    wasted_indices = [i for i in wasted_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
+    if do_llm_filter:
+        for r in analysis.get("wasted_word_ranges", []):
+            if isinstance(r, dict):
+                start_idx = r.get("start_index", r.get("word_index_start"))
+                end_idx = r.get("end_index", r.get("word_index_end"))
+                if start_idx is not None and end_idx is not None:
+                    wasted_indices.extend(range(start_idx, end_idx + 1))
+            elif isinstance(r, (list, tuple)) and len(r) >= 2:
+                wasted_indices.extend(range(r[0], r[1] + 1))
+        wasted_indices.extend(analysis.get("wasted_word_indices", []))
+        wasted_indices = [i for i in wasted_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
 
     excluded_indices = set(hidden_indices + wasted_indices)
 
@@ -466,12 +488,12 @@ def refine_video(
     raw_groups = analysis.get("groups", [])
     validated_groups = _validate_groups(raw_groups, len(adjusted_words), excluded_indices)
 
-    if validated_groups:
+    if validated_groups and do_grouping:
         groups = validated_groups
         log("apply", f"Using {len(groups)} Gemini-generated groups")
     else:
         groups = _fallback_groups(adjusted_words, excluded_indices)
-        log("apply", f"Gemini groups invalid — using {len(groups)} auto-groups")
+        log("apply", f"Gemini groups invalid/skipped — using {len(groups)} auto-groups")
 
     # Attach timing to groups
     for g in groups:
