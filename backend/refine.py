@@ -121,6 +121,13 @@ of these words to be cut out. Be brutal with cutting out boring parts to maintai
 audience retention, but do NOT cut out the hook or important context/punchlines. \
 If no words should be cut, return an empty list.
 
+═══ TASK 6 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
+You may be provided with TWO transcripts:
+- SOURCE A (WhisperX): Word-level, but might have misspellings or poor punctuation.
+- SOURCE B (YouTube CC): Might have lower timing precision, but often has better spelling for names, brands, and proper nouns.
+
+Compare them. If SOURCE B exists, use its spelling and punctuation to correct SOURCE A. Your FINAL 'words' in the output JSON should use the timing from SOURCE A but the optimized text from your hybrid analysis.
+
 ═══ RESPONSE FORMAT ═══
 {
   "speakers": {
@@ -141,34 +148,52 @@ If no words should be cut, return an empty list.
     "reason": "Why this is the best hook"
   },
   "hidden_word_indices": [],
-  "wasted_word_indices": []
+  "wasted_word_indices": [],
+  "optimized_words": [
+     {"index": 0, "text": "Corrected word"},
+     ...
+  ]
 }
+Note: 'optimized_words' should only be returned if you found corrections to make.
+If you return 'optimized_words', ensure the count and order exactly match the input.
 """
 
 
-def analyze_with_gemini(words: list[dict], api_key: str) -> dict:
+def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optional[str] = None) -> dict:
     """
     Send word-level transcript to Gemini for speaker identification,
     smart grouping, hook detection, and overlap handling.
+    
+    If reference_text (YouTube captions) is provided, Gemini will use it
+     to improve spelling and punctuation.
     """
     if not GEMINI_AVAILABLE:
         raise RuntimeError("google-genai is not installed. Run: pip install google-genai")
 
     client = genai.Client(api_key=api_key)
 
-    # Build compact transcript
+    # Build compact transcript from Source A (WhisperX)
     lines = []
     for i, w in enumerate(words):
         lines.append(f"{i}|{w['start']:.2f}|{w['end']:.2f}|{w['text']}")
 
     transcript_text = "\n".join(lines)
 
-    prompt = (
-        f"Here is a word-level transcript. Each line: INDEX|START|END|WORD\n\n"
-        f"{transcript_text}\n\n"
-        f"Total words: {len(words)}\n"
-        f"Analyze this transcript following ALL instructions. Return ONLY valid JSON."
+    prompt_parts = [
+        f"═══ SOURCE A (WhisperX Word-Level) ═══\nEach line: INDEX|START|END|WORD\n\n{transcript_text}\n"
+    ]
+
+    if reference_text:
+        prompt_parts.append(
+            f"\n═══ SOURCE B (YouTube CC Reference) ═══\nThis source has better spelling for names and brands:\n\n{reference_text}\n"
+        )
+
+    prompt_parts.append(
+        f"\nTotal words to process: {len(words)}\n"
+        f"Analyze following ALL instructions. Return ONLY valid JSON."
     )
+
+    prompt = "".join(prompt_parts)
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -351,10 +376,47 @@ def refine_video(
         f"{len(adjusted_words)} words remain",
     )
 
-    # ── Step 3: Gemini analysis ─────────────────────────────
+    # ── Step 3: Check for reference captions (Optional) ──────
+    reference_text = None
+    # Try direct lookup first
+    yt_caps_path = video_path.with_suffix(".yt_captions.json")
+    
+    # If not found directly (maybe file was reframed/renamed), try prefix matching in UPLOAD_DIR
+    if not yt_caps_path.exists():
+        # Match pattern: yt_01_...
+        match = re.search(r'^(yt_\d{2}_)', video_path.name)
+        if match:
+            prefix = match.group(1)
+            # Try to find a matching captions file in the uploads folder
+            # We assume uploads is adjacent to rendered or can be inferred
+            parent_dir = video_path.parent
+            search_dirs = [parent_dir]
+            if "rendered" in str(parent_dir):
+                # Try sibling 'uploads' directory
+                pot_uploads = parent_dir.parent / "uploads"
+                if pot_uploads.exists():
+                    search_dirs.append(pot_uploads)
+            
+            for d in search_dirs:
+                matches = list(d.glob(f"{prefix}*.yt_captions.json"))
+                if matches:
+                    yt_caps_path = matches[0]
+                    break
+
+    if yt_caps_path.exists():
+        try:
+            log("analyze", f"Found reference captions: {yt_caps_path.name}")
+            with open(yt_caps_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                segments = data.get("segments", [])
+                reference_text = " ".join(s.get("text", "") for s in segments)
+        except Exception as e:
+            log("analyze", f"Warning: Failed to load reference captions: {e}")
+
+    # ── Step 4: Gemini analysis ─────────────────────────────
     log("analyze", "Sending transcript to Gemini AI…")
 
-    analysis = analyze_with_gemini(adjusted_words, gemini_api_key)
+    analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text)
 
     log("analyze", "Gemini analysis complete")
 
@@ -371,6 +433,16 @@ def refine_video(
 
     for i, w in enumerate(adjusted_words):
         w["speaker"] = speaker_map.get(i, "SPEAKER_1")
+
+    # 4a-bis — Optimized words (Hybrid mode using reference)
+    optimized = analysis.get("optimized_words", [])
+    if optimized and len(optimized) == len(adjusted_words):
+        log("apply", "Applying Optimized Text from source B (Hybrid Mode)")
+        for item in optimized:
+            idx = item.get("index")
+            text = item.get("text")
+            if isinstance(idx, int) and 0 <= idx < len(adjusted_words) and text:
+                adjusted_words[idx]["text"] = text
 
     # 4b — Groups (validate, fallback if needed)
     raw_groups = analysis.get("groups", [])

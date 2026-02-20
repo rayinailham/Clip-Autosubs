@@ -127,16 +127,15 @@ def _extract_via_transcript_api(url: str) -> dict:
     transcript_list = YouTubeTranscriptApi().list(video_id)
     
     # Identify the best transcript:
-    # 1. Prefer manually created original language
-    # 2. Fall back to auto-generated original language
+    # 1. Prefer auto-generated original language (as requested by user)
+    # 2. Fall back to manually created original language
     # 3. Fall back to any Japanese/English version
     # 4. Fall back to the first available
     try:
-        transcript = transcript_list.find_manually_created_transcript()
+        transcript = transcript_list.find_generated_transcript()
     except Exception:
         try:
-            # Prefer the primary generated language
-            transcript = transcript_list.find_generated_transcript()
+            transcript = transcript_list.find_manually_created_transcript()
         except Exception:
             try:
                 # Specific search for common languages
@@ -217,10 +216,9 @@ def extract_transcript(url: str) -> dict:
             with tempfile.TemporaryDirectory() as tmpdir:
                 ydl_opts = {
                     "skip_download": True,
-                    "writesubtitles": True,
+                    "writesubtitles": False, # Prefer auto-generated only as requested
                     "writeautomaticsub": True,
-                    # "all" might be too much, but "" or ".*" usually works to find what's there
-                    # We prioritize the original language and English/Japanese
+                    # We download all to ensure we get something, but we'll prioritize original language
                     "subtitleslangs": [".*"],
                     "subtitlesformat": "json3/vtt/best",
                     "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
@@ -236,22 +234,33 @@ def extract_transcript(url: str) -> dict:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
 
+                # Identify the best subtitle file from the temp dir
                 video_id = info.get("id", "unknown")
                 title = info.get("title", "Unknown Video")
                 duration = float(info.get("duration") or 0)
-
-                # Find a subtitle file in the temp dir
+                video_lang = info.get("language")
                 tmp_path = Path(tmpdir)
-                sub_files = sorted(tmp_path.glob(f"{video_id}*.json3")) or sorted(tmp_path.glob(f"{video_id}*.vtt"))
+                
+                # Priority 1: Match video language (original audio language)
+                sub_files = []
+                if video_lang:
+                    # Match exact language code (e.g. .en.json3 or .en-US.json3)
+                    sub_files = sorted(tmp_path.glob(f"{video_id}.{video_lang}*.json3")) or \
+                                sorted(tmp_path.glob(f"{video_id}.{video_lang}*.vtt"))
+                
+                # Priority 2: Any auto-subs for this video ID
+                if not sub_files:
+                    sub_files = sorted(tmp_path.glob(f"{video_id}*.json3")) or \
+                                sorted(tmp_path.glob(f"{video_id}*.vtt"))
 
                 if not sub_files:
-                    # Try without language suffix
+                    # Last resort fallback: any caption file found
                     sub_files = sorted(tmp_path.glob("*.json3")) + sorted(tmp_path.glob("*.vtt"))
 
                 if not sub_files:
                     raise RuntimeError(
-                        "No captions found for this video. "
-                        "The video may have no CC or auto-generated subtitles."
+                        "No auto-generated captions found for this video in the original language. "
+                        "The video may have auto-captions disabled."
                     )
 
                 sub_file = sub_files[0]
@@ -559,6 +568,15 @@ def download_and_cut_clips(
 
         source_file = download_video(url, tmp_path, progress_cb=_dl_progress)
 
+        # Stage 1.5: Extract full transcript for the whole video (to split for clips later)
+        # This will be used as a "reference" for the Refine stage.
+        yt_transcript = None
+        try:
+            print("[yt-clipper] Extracting reference transcript for clips…")
+            yt_transcript = extract_transcript(url)
+        except Exception as e:
+            print(f"[yt-clipper] Warning: Could not extract reference transcript: {e}")
+
         if progress_cb:
             progress_cb("cutting", 0)
 
@@ -572,6 +590,28 @@ def download_and_cut_clips(
             out_path = uploads_dir / filename
 
             cut_clip(source_file, clip["start"], clip["end"], out_path)
+
+            # Save reference YouTube captions for this specific clip (if available)
+            if yt_transcript and yt_transcript.get("segments"):
+                clip_start = clip["start"]
+                clip_end = clip["end"]
+                # Filter segments that overlap with this clip
+                clip_segments = []
+                for seg in yt_transcript["segments"]:
+                    if seg["start"] < clip_end and seg["end"] > clip_start:
+                        # Offset segment times to start from 0 for this clip
+                        shifted = {
+                            "start": round(max(0, seg["start"] - clip_start), 3),
+                            "end": round(seg["end"] - clip_start, 3),
+                            "text": seg["text"]
+                        }
+                        clip_segments.append(shifted)
+                
+                if clip_segments:
+                    cap_path = out_path.with_suffix(".yt_captions.json")
+                    with open(cap_path, "w", encoding="utf-8") as f:
+                        json.dump({"segments": clip_segments}, f, indent=2, ensure_ascii=False)
+                    print(f"[yt-clipper] Saved reference captions: {cap_path.name}")
 
             results.append({
                 "id": clip["id"],
