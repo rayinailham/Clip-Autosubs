@@ -273,6 +273,7 @@ def refine_video(
     output_dir: str,
     rendered_dir: str,
     gemini_api_key: str,
+    transcription_model: str = "large-v2",
     min_silence_ms: int = 500,
     padding_ms: int = 100,
     progress_cb: Optional[Callable[[str, str], None]] = None,
@@ -308,7 +309,11 @@ def refine_video(
     # ── Step 1: Transcribe ──────────────────────────────────
     log("transcribe", "Transcribing video with WhisperX…")
 
-    transcription = transcribe_video(str(video_path), output_dir)
+    transcription = transcribe_video(
+        str(video_path), 
+        output_dir,
+        model_id=transcription_model
+    )
     words = transcription["words"]
     metadata = transcription["metadata"]
 

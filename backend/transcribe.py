@@ -57,7 +57,8 @@ def get_vram_usage() -> dict:
 def transcribe_video(video_path: str, output_dir: str | None = None,
                      hf_token: str | None = None,
                      min_speakers: int | None = None,
-                     max_speakers: int | None = None) -> dict:
+                     max_speakers: int | None = None,
+                     model_id: str = "large-v2") -> dict:
     """
     Full transcription pipeline:
       1. Load audio from video
@@ -97,9 +98,9 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
     print(f"[transcribe] Audio loaded — {len(audio)/16000:.1f}s @ 16kHz")
 
     # ── Step 2: Transcribe ──────────────────────────────────
-    print(f"[transcribe] Loading model '{MODEL_SIZE}' ({COMPUTE_TYPE})...")
+    print(f"[transcribe] Loading model '{model_id}' ({COMPUTE_TYPE})...")
     model = whisperx.load_model(
-        MODEL_SIZE,
+        model_id,
         DEVICE,
         compute_type=COMPUTE_TYPE,
     )
@@ -211,7 +212,7 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
             "source_file": video_path.name,
             "source_language": detected_language,
             "language": "en",  # output is always English (translated)
-            "model": MODEL_SIZE,
+            "model": model_id,
             "compute_type": COMPUTE_TYPE,
             "device": DEVICE,
             "duration_seconds": round(len(audio) / 16000, 2),

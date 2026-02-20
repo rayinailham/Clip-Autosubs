@@ -155,6 +155,7 @@ class StyleConfig(BaseModel):
 
 class TranscribeExistingRequest(BaseModel):
     filename: str
+    transcription_model: Optional[str] = "large-v2"
     hf_token: Optional[str] = None       # HuggingFace token for diarization
     min_speakers: Optional[int] = None   # Min speakers (hint)
     max_speakers: Optional[int] = None   # Max speakers (hint)
@@ -212,6 +213,7 @@ class TrimRequest(BaseModel):
 class RefineRequest(BaseModel):
     video_filename: str
     gemini_api_key: str
+    transcription_model: Optional[str] = "large-v2"
     min_silence_ms: int = 500
     padding_ms: int = 100
 
@@ -262,6 +264,7 @@ async def system_status():
 @app.post("/transcribe")
 async def transcribe_endpoint(
     file: UploadFile = File(...),
+    transcription_model: Optional[str] = Form("large-v2"),
     hf_token: Optional[str] = Form(None),
     min_speakers: Optional[int] = Form(None),
     max_speakers: Optional[int] = Form(None),
@@ -298,6 +301,7 @@ async def transcribe_endpoint(
         result = transcribe_video(
             str(upload_path),
             str(OUTPUT_DIR),
+            model_id=transcription_model,
             hf_token=hf_token or None,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
@@ -611,6 +615,7 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
         result = transcribe_video(
             str(upload_path),
             str(OUTPUT_DIR),
+            model_id=payload.transcription_model,
             hf_token=payload.hf_token or None,
             min_speakers=payload.min_speakers,
             max_speakers=payload.max_speakers,
@@ -1093,6 +1098,7 @@ def _do_refine(job_id: str, req: RefineRequest):
             output_dir=str(OUTPUT_DIR),
             rendered_dir=str(RENDERED_DIR),
             gemini_api_key=req.gemini_api_key,
+            transcription_model=req.transcription_model,
             min_silence_ms=req.min_silence_ms,
             padding_ms=req.padding_ms,
             progress_cb=progress,

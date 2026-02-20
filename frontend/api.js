@@ -21,6 +21,7 @@ export async function loadTranscriptionJSON(encodedJson) {
 export async function uploadAndTranscribe(file, diarizeOpts = {}) {
   const formData = new FormData();
   formData.append('file', file);
+  if (diarizeOpts.transcription_model) formData.append('transcription_model', diarizeOpts.transcription_model);
   // Optional diarization fields
   if (diarizeOpts.hf_token) formData.append('hf_token', diarizeOpts.hf_token);
   if (diarizeOpts.min_speakers != null) formData.append('min_speakers', String(diarizeOpts.min_speakers));
@@ -35,6 +36,7 @@ export async function uploadAndTranscribe(file, diarizeOpts = {}) {
 
 export async function transcribeExistingFile(filename, diarizeOpts = {}) {
   const body = { filename };
+  if (diarizeOpts.transcription_model) body.transcription_model = diarizeOpts.transcription_model;
   if (diarizeOpts.hf_token) body.hf_token = diarizeOpts.hf_token;
   if (diarizeOpts.min_speakers != null) body.min_speakers = diarizeOpts.min_speakers;
   if (diarizeOpts.max_speakers != null) body.max_speakers = diarizeOpts.max_speakers;

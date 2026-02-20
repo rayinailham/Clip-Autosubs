@@ -117,6 +117,7 @@ export default {
         const { job_id } = await startRefineJob({
           video_filename: filename,
           gemini_api_key: apiKey.value.trim(),
+          transcription_model: store.transcriptionModel
         });
         store.refine.jobId = job_id;
         startPolling(job_id);
@@ -249,7 +250,7 @@ export default {
     });
 
     return {
-      uploads, loading, apiKey, selectedFile, uploading, uploadFile, step,
+      store, uploads, loading, apiKey, selectedFile, uploading, uploadFile, step,
       progress, error, progressPct, stepIndex,
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
@@ -284,6 +285,19 @@ export default {
               <h2>Drop a vertical video</h2>
               <p>MP4, MOV, WEBM — up to 500 MB</p>
             </div>
+          </div>
+        </div>
+
+        <!-- Transcription Options -->
+        <div class="transcription-options" style="max-width: 560px; width: 100%; margin-top: 1rem;">
+          <div style="margin-bottom: 0.8rem; background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+            <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
+              <span>🧠 Transcription Model</span>
+              <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
+                <option value="large-v2">WhisperX (English / Auto-Translate)</option>
+                <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+              </select>
+            </label>
           </div>
         </div>
 

@@ -19,7 +19,7 @@ export default {
     }
 
     function getDiarizeOpts() {
-      const opts = {};
+      const opts = { transcription_model: store.transcriptionModel };
       const token = (store.diarization.hfToken || '').trim();
       if (token) opts.hf_token = token;
       const maxSp = store.diarization.maxSpeakers;
@@ -186,8 +186,17 @@ export default {
         </div>
       </div>
 
-      <!-- Speaker Diarization Options -->
-      <div class="diarize-options" style="max-width: 560px; width: 100%; margin-top: 1rem;">
+      <!-- Transcription Options -->
+      <div class="transcription-options" style="max-width: 560px; width: 100%; margin-top: 1rem;">
+        <div style="margin-bottom: 0.8rem; background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+          <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
+            <span>🧠 Transcription Model</span>
+            <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
+              <option value="large-v2">WhisperX (English / Auto-Translate)</option>
+              <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+            </select>
+          </label>
+        </div>
         <button class="btn btn-ghost btn-sm" @click="showDiarize = !showDiarize"
                 style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim);">
           <span style="font-size: 0.6rem;">{{ showDiarize ? '▼' : '▶' }}</span>
