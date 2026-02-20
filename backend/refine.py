@@ -75,7 +75,7 @@ def adjust_timestamps(
 
 _REFINE_SYSTEM_PROMPT = """\
 You are a professional video editor and subtitle expert. You will be given a word-level \
-transcript with timestamps from a short video. Perform ALL of the following tasks and \
+transcript with timestamps from a video. Perform ALL of the following tasks and \
 return ONLY valid JSON (no markdown, no explanation).
 
 ═══ TASK 1 — SPEAKER IDENTIFICATION ═══
@@ -114,6 +114,13 @@ If different speakers have words with overlapping time ranges (they talked at th
 same time), decide which speaker's words are MORE important and mark the LESS \
 important overlapping words for hiding. If no overlaps exist, return an empty list.
 
+═══ TASK 5 — WASTED TIME REMOVAL ═══
+Identify portions of the transcript where the speaker is excessively rambling, \
+going off-topic, or just wasting time with unnecessary filler words. Mark the indices \
+of these words to be cut out. Be brutal with cutting out boring parts to maintain \
+audience retention, but do NOT cut out the hook or important context/punchlines. \
+If no words should be cut, return an empty list.
+
 ═══ RESPONSE FORMAT ═══
 {
   "speakers": {
@@ -133,7 +140,8 @@ important overlapping words for hiding. If no overlaps exist, return an empty li
     "word_index_end": 25,
     "reason": "Why this is the best hook"
   },
-  "hidden_word_indices": []
+  "hidden_word_indices": [],
+  "wasted_word_indices": []
 }
 """
 
@@ -392,6 +400,12 @@ def refine_video(
     # 4e — Speakers info
     speakers = analysis.get("speakers", {"SPEAKER_1": "Speaker 1"})
 
+    # 4f — Wasted (rambling, unnecessary words)
+    wasted_indices = [
+        i for i in analysis.get("wasted_word_indices", [])
+        if isinstance(i, int) and 0 <= i < len(adjusted_words)
+    ]
+
     elapsed = round(time.time() - t0, 1)
     log("done", f"Refine complete in {elapsed}s!")
 
@@ -403,6 +417,7 @@ def refine_video(
         "hook": hook,
         "speakers": speakers,
         "hidden_indices": hidden_indices,
+        "wasted_indices": wasted_indices,
         "metadata": metadata,
         "silence_stats": {
             "original_duration_s": stats["original_duration_s"],
