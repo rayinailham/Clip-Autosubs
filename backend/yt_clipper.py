@@ -471,14 +471,20 @@ def cut_clip(
     Cut a clip from source_video [start, end] (seconds) and save to output_path.
     Uses FFmpeg stream copy for speed (no re-encode).
     """
+    duration = end - start
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         "ffmpeg", "-y",
         "-ss", _seconds_to_ffmpeg_ts(start),
-        "-to", _seconds_to_ffmpeg_ts(end),
         "-i", str(source_video),
-        "-c", "copy",
+        "-t", _seconds_to_ffmpeg_ts(duration),
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "fast",
+        "-c:a", "aac",
+        "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
         str(output_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)

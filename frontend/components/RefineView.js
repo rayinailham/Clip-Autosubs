@@ -8,7 +8,7 @@ export default {
     const uploads = ref([]);
     const loading = ref(false);
     const apiKey = ref(store.refine.geminiApiKey || '');
-    const selectedFile = ref('');
+    const selectedFile = ref(store.refine.videoFilename || '');
     const uploading = ref(false);
     const uploadFile = ref(null);
     const step = ref('setup');  // 'setup' | 'processing' | 'done' | 'error'
@@ -39,9 +39,17 @@ export default {
       loading.value = true;
       try {
         const data = await fetchUploads();
-        uploads.value = (data.files || []).filter(f =>
+        let fetched = (data.files || []).filter(f =>
           f.filename.endsWith('.mp4') || f.filename.endsWith('.mov') || f.filename.endsWith('.webm')
         );
+        if (store.refine.videoFilename && !fetched.find(f => f.filename === store.refine.videoFilename)) {
+          fetched.unshift({ filename: store.refine.videoFilename, size_mb: 'Rendered' });
+        }
+        uploads.value = fetched;
+        if (store.refine.videoFilename) {
+          selectedFile.value = store.refine.videoFilename;
+          store.refine.videoFilename = '';
+        }
       } catch (e) {
         console.error('Failed to load uploads:', e);
       }
@@ -259,7 +267,7 @@ export default {
             <select v-if="uploads.length > 0" class="refine-select" v-model="selectedFile" @change="uploadFile = null">
               <option value="">Select an uploaded video…</option>
               <option v-for="f in uploads" :key="f.filename" :value="f.filename">
-                {{ f.filename }} ({{ f.size_mb }} MB)
+                {{ f.filename }} ({{ f.size_mb }}{{ f.size_mb === 'Rendered' ? '' : ' MB' }})
               </option>
             </select>
           </div>

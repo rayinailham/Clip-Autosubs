@@ -128,7 +128,7 @@ def render_vtuber_short(
     bottom_h = out_height - top_h       # bottom section
 
     if progress_cb:
-        progress_cb(f"Source: {src_w}×{src_h}  →  output: {out_width}×{out_height}")
+        progress_cb(f"Source: {src_w}x{src_h}  ->  output: {out_width}x{out_height}")
 
     # ── Crop parameters ──────────────────────────────────────
     tx, ty, tw, th = _compute_crop(
@@ -142,8 +142,8 @@ def render_vtuber_short(
 
     if progress_cb:
         progress_cb(
-            f"Top crop: {tw}×{th} @ ({tx},{ty})  "
-            f"Bot crop: {bw}×{bh} @ ({bx},{by})"
+            f"Top crop: {tw}x{th} @ ({tx},{ty})  "
+            f"Bot crop: {bw}x{bh} @ ({bx},{by})"
         )
 
     # ── FFmpeg filter graph ──────────────────────────────────
@@ -247,7 +247,7 @@ def render_shorts_zoomed(
     src_w, src_h = info["width"], info["height"]
 
     if progress_cb:
-        progress_cb(f"Source: {src_w}×{src_h}  →  output: {out_width}×{out_height}")
+        progress_cb(f"Source: {src_w}x{src_h}  ->  output: {out_width}x{out_height}")
 
     cx, cy, cw, ch = _compute_crop(src_w, src_h, out_width, out_height, zoom, pan_x, pan_y)
 
@@ -299,7 +299,7 @@ def render_shorts_blur_bg(
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     if progress_cb:
-        progress_cb(f"Rendering blur-background short  →  {out_width}×{out_height}")
+        progress_cb(f"Rendering blur-background short  ->  {out_width}x{out_height}")
 
     # Background: scale to cover 9:16, then gaussian blur + slightly darken
     # Foreground: scale to fit (contain) inside 9:16, centered
@@ -354,7 +354,7 @@ def render_shorts_black_bg(
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     if progress_cb:
-        progress_cb(f"Rendering black-background short  →  {out_width}×{out_height}")
+        progress_cb(f"Rendering black-background short  ->  {out_width}x{out_height}")
 
     filter_complex = (
         f"[0:v]scale={out_width}:{out_height}:force_original_aspect_ratio=decrease,"

@@ -899,7 +899,7 @@ def _do_trim(job_id: str, req: TrimRequest):
             trim_jobs[job_id] = {"status": "error", "error": "trim_end must be greater than trim_start"}
             return
 
-        log(f"Trimming {video_path.name}  {req.trim_start:.3f}s → {req.trim_end:.3f}s  ({duration:.3f}s)")
+        log(f"Trimming {video_path.name}  {req.trim_start:.3f}s -> {req.trim_end:.3f}s  ({duration:.3f}s)")
 
         output_filename = f"{video_path.stem}_trim_{job_id}.mp4"
         output_path = RENDERED_DIR / output_filename
@@ -909,9 +909,9 @@ def _do_trim(job_id: str, req: TrimRequest):
 
         cmd = [
             "ffmpeg", "-y",
-            "-i", str(video_path),
             "-ss", str(req.trim_start),
-            "-to", str(req.trim_end),
+            "-i", str(video_path),
+            "-t", str(duration),
             "-c:v", "libx264",
             "-crf", "18",
             "-preset", "fast",
@@ -934,7 +934,7 @@ def _do_trim(job_id: str, req: TrimRequest):
 
         elapsed = round(_time.time() - t0, 1)
         size_mb = round(output_path.stat().st_size / (1024 * 1024), 2)
-        log(f"Done in {elapsed}s → {output_filename} ({size_mb} MB)")
+        log(f"Done in {elapsed}s -> {output_filename} ({size_mb} MB)")
 
         trim_jobs[job_id] = {
             "status": "done",
@@ -1078,6 +1078,8 @@ def _do_refine(job_id: str, req: RefineRequest):
     try:
         video_path = UPLOAD_DIR / req.video_filename
         if not video_path.exists():
+            video_path = RENDERED_DIR / req.video_filename
+        if not video_path.exists():
             refine_jobs[job_id] = {
                 "status": "error",
                 "error": f"Video file not found: {req.video_filename}",
@@ -1114,6 +1116,8 @@ async def start_refine(req: RefineRequest, background_tasks: BackgroundTasks):
     if not req.gemini_api_key.strip():
         raise HTTPException(status_code=400, detail="Gemini API key is required.")
     video_path = UPLOAD_DIR / req.video_filename
+    if not video_path.exists():
+        video_path = RENDERED_DIR / req.video_filename
     if not video_path.exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {req.video_filename}")
     job_id = uuid.uuid4().hex[:8]

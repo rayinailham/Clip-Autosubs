@@ -105,10 +105,10 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
     )
     print(f"[transcribe] VRAM after model load: {get_vram_usage()}")
 
-    print("[transcribe] Transcribing (task=translate → forced English output)...")
+    print("[transcribe] Transcribing (task=translate -> forced English output)...")
     result = model.transcribe(audio, batch_size=BATCH_SIZE, task="translate")
     detected_language = result.get("language", "en")  # original source language
-    print(f"[transcribe] Detected source language: {detected_language} → translating to English")
+    print(f"[transcribe] Detected source language: {detected_language} -> translating to English")
     print(f"[transcribe] Segments (pre-align): {len(result['segments'])}")
 
     # Free transcription model before loading alignment model
@@ -230,7 +230,7 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
 
     print(f"[transcribe] Done! {len(words)} words in {elapsed}s")
     if speakers_detected:
-        print(f"[transcribe]   → {speakers_detected} speaker(s) detected")
+        print(f"[transcribe]   -> {speakers_detected} speaker(s) detected")
     print(f"[transcribe] JSON saved to: {json_path}")
 
     return output

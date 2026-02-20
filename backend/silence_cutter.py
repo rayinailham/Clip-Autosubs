@@ -248,7 +248,7 @@ def cut_silence(
     # ── Get video duration ──────────────────────────────────────────────────
     info = get_video_info(str(video_path))
     duration = info["duration"]
-    log(f"Video duration: {duration:.2f}s  ({info['width']}×{info['height']})")
+    log(f"Video duration: {duration:.2f}s  ({info['width']}x{info['height']})")
 
     # ── Prepare segments ────────────────────────────────────────────────────
     t0 = time.time()
@@ -375,7 +375,7 @@ def cut_silence(
     elapsed = round(time.time() - t0, 1)
     size_mb = round(output_path.stat().st_size / (1024 * 1024), 2)
 
-    log(f"Done in {elapsed}s → {output_path.name} ({size_mb} MB)")
+    log(f"Done in {elapsed}s -> {output_path.name} ({size_mb} MB)")
 
     return {
         "output_path": str(output_path),

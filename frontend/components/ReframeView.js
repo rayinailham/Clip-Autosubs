@@ -183,6 +183,7 @@ export default {
             r.status = `Done — ${data.size_mb} MB`;
             r.downloadUrl = data.url;
             r.downloadLabel = `📥 Download (${data.size_mb} MB)`;
+            r.filename = data.filename;
           } else if (data.status === 'error') {
             clearInterval(pollInterval);
             r.error = true;
@@ -200,6 +201,14 @@ export default {
     function goHome() {
       if (pollInterval) clearInterval(pollInterval);
       store.appMode = 'home';
+    }
+
+    function goToRefine() {
+      if (!store.reframe.render.filename) return;
+      if (pollInterval) clearInterval(pollInterval);
+      store.refine.videoFilename = store.reframe.render.filename;
+      store.refine.step = 'setup';
+      store.appMode = 'refine';
     }
 
     onMounted(() => loadPreviousUploads());
@@ -220,7 +229,7 @@ export default {
       uploads, uploadsLoading, loadPreviousUploads, useExistingUpload, videoURL,
       onFileChange, onDrop, onDragover, onDragleave,
       videoTop, videoBot, playing, syncBot, togglePlay,
-      sectionStyle, startRender, closeRender, goHome, setMode, goBack,
+      sectionStyle, startRender, closeRender, goHome, goToRefine, setMode, goBack,
       rr, videoSrc, topPct, botPct,
     };
   },
@@ -553,6 +562,7 @@ export default {
 
             <div v-if="rr.done" style="margin-top:1rem; display:flex; flex-direction:column; gap:.5rem">
               <a :href="rr.downloadUrl" class="btn btn-success" download>{{ rr.downloadLabel }}</a>
+              <button class="btn btn-primary" style="background:var(--accent); border-color:var(--accent); color:#000" @click="goToRefine">✨ Auto-Refine this video</button>
               <button class="btn btn-outline btn-sm" @click="closeRender">Close</button>
             </div>
             <div v-if="rr.error" style="margin-top:1rem">
