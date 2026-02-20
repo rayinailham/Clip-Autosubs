@@ -111,6 +111,24 @@ def _extract_video_id(url: str) -> str:
     return ""
 
 
+def _get_cookie_opts_list() -> list[dict]:
+    """Return a list of cookie configurations to try, in order of preference."""
+    opts = []
+    # 1. Local cookies.txt (most reliable, avoids browser lock/DPAPI completely)
+    if Path("cookies.txt").exists():
+        opts.append({"cookiefile": "cookies.txt"})
+    # 2. Try browsers (excluding chrome initially if possible, or placing it last due to App-Bound Encryption DPAPI issues)
+    opts.extend([
+        {"cookiesfrombrowser": ("edge",)},
+        {"cookiesfrombrowser": ("firefox",)},
+        {"cookiesfrombrowser": ("brave",)},
+        {"cookiesfrombrowser": ("opera",)},
+        {"cookiesfrombrowser": ("chrome",)},
+        {}  # Fallback: try without cookies
+    ])
+    return opts
+
+
 def _extract_via_transcript_api(url: str) -> dict:
     """
     Fallback: use youtube_transcript_api to fetch captions directly.
@@ -172,8 +190,7 @@ def _extract_via_transcript_api(url: str) -> dict:
     title = "Unknown Video"
     duration = 0.0
     if YT_DLP_AVAILABLE:
-        # Try with cookies first, then without if they fail (e.g. locked database)
-        for use_cookies in [True, False]:
+        for cookie_opt in _get_cookie_opts_list():
             try:
                 meta_opts = {
                     "skip_download": True,
@@ -182,8 +199,7 @@ def _extract_via_transcript_api(url: str) -> dict:
                     "source_address": "0.0.0.0",
                     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                 }
-                if use_cookies:
-                    meta_opts["cookiesfrombrowser"] = ["chrome"]
+                meta_opts.update(cookie_opt)
                 
                 with yt_dlp.YoutubeDL(meta_opts) as ydl:
                     info = ydl.extract_info(url, download=False)
@@ -191,11 +207,8 @@ def _extract_via_transcript_api(url: str) -> dict:
                     duration = float(info.get("duration") or 0)
                     break # Success!
             except Exception as e:
-                if not use_cookies: # Last attempt failed
-                    print(f"[yt-clipper] Warning: Metadata extraction failed: {e}")
-                    if segments:
-                        duration = segments[-1]["end"]
-
+                pass
+                
     return {
         "video_title": title,
         "video_id": video_id,
@@ -230,26 +243,35 @@ def extract_transcript(url: str) -> dict:
     for attempt in range(1, max_retries + 1):
         try:
             with tempfile.TemporaryDirectory() as tmpdir:
-                ydl_opts = {
-                    "skip_download": True,
-                    "writesubtitles": False, # Prefer auto-generated only as requested
-                    "writeautomaticsub": True,
-                    # We download all to ensure we get something, but we'll prioritize original language
-                    "subtitleslangs": [".*"],
-                    "subtitlesformat": "json3/vtt/best",
-                    "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
-                    "quiet": True,
-                    "no_warnings": True,
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "referer": "https://www.youtube.com/",
-                    "cookiesfrombrowser": ["chrome"], # Use Chrome as requested by user - as list to avoid yt-dlp bug
-                    # ── Anti-429 options ──
-                    "sleep_interval_subtitles": 7,   # even longer delay
-                    "source_address": "0.0.0.0",     # force IPv4
-                }
+                # Try cookies in priority order until one succeeds at getting info
+                info = None
+                cookie_opts = _get_cookie_opts_list()
+                
+                for c_idx, cookie_opt in enumerate(cookie_opts):
+                    try:
+                        ydl_opts = {
+                            "skip_download": True,
+                            "writesubtitles": False,
+                            "writeautomaticsub": True,
+                            "subtitleslangs": [".*"],
+                            "subtitlesformat": "json3/vtt/best",
+                            "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
+                            "quiet": True,
+                            "no_warnings": True,
+                            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                            "referer": "https://www.youtube.com/",
+                            "sleep_interval_subtitles": 7,
+                            "source_address": "0.0.0.0",
+                        }
+                        ydl_opts.update(cookie_opt)
 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            info = ydl.extract_info(url, download=True)
+                            break  # Success
+                    except Exception as loop_e:
+                        if c_idx == len(cookie_opts) - 1:
+                            raise loop_e  # Last resort failed, let the outer retry block catch it
+                
 
                 # Identify the best subtitle file from the temp dir
                 video_id = info.get("id", "unknown")
@@ -503,8 +525,8 @@ def download_video(
                 if total:
                     progress_cb(int(downloaded / total * 100))
 
-    # Try downloading with cookies first, fallback to no-cookies if database is locked
-    for use_cookies in [True, False]:
+    cookie_opts = _get_cookie_opts_list()
+    for c_idx, cookie_opt in enumerate(cookie_opts):
         try:
             ydl_opts = {
                 "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
@@ -515,34 +537,37 @@ def download_video(
                 "progress_hooks": [_ProgressHook()],
                 "concurrent_fragment_downloads": 5,
                 "continuedl": True,
+                "external_downloader_args": {"ffmpeg": ["-rw_timeout", "15000000"]}, # 15s timeout to prevent hang
             }
             if clip_range:
                 from yt_dlp.utils import download_range_func
                 ydl_opts["download_ranges"] = download_range_func(None, [clip_range])
                 ydl_opts["force_keyframes_at_cuts"] = True
 
-            if use_cookies:
-                ydl_opts["cookiesfrombrowser"] = ["chrome"]
+            ydl_opts.update(cookie_opt)
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 break # Success!
         except Exception as e:
             err_msg = str(e)
-            is_lock_error = "Could not copy" in err_msg and "cookie" in err_msg
             is_bot_error = "confirm you’re not a bot" in err_msg or "429" in err_msg or "Sign in" in err_msg
-
-            if use_cookies and (is_lock_error or "access is denied" in err_msg.lower()):
-                print("[yt-clipper] Cookie database is locked (is your browser open?). Trying download without cookies…")
-                continue
             
+            # Print warning but don't abort unless it's the last try
+            if c_idx < len(cookie_opts) - 1:
+                if "Could not copy" in err_msg and "cookie" in err_msg:
+                    print(f"[yt-clipper] Cookie database ({cookie_opt}) locked or inaccessible. Trying next…")
+                elif is_bot_error:
+                    print(f"[yt-clipper] Bot detection triggered with {cookie_opt}. Trying next option…")
+                continue
+
             if is_bot_error:
                 raise RuntimeError(
                     "YouTube is blocking the download (bot detection).\n"
-                    "FIX: Close your browser (Edge/Chrome) completely so the script can access your login cookies, then try again."
+                    "FIX: Create a 'cookies.txt' file in your project folder using a browser extension "
+                    "like 'Get cookies.txt LOCALLY' so yt-dlp can authenticate."
                 )
-            if not use_cookies:
-                raise RuntimeError(f"Video download failed: {e}")
+            raise RuntimeError(f"Video download failed: {e}")
 
     # Find the downloaded file
     matches = [p for p in output_dir.iterdir() if p.stem == stem]
@@ -603,19 +628,29 @@ def download_and_cut_clips(
     Returns:
         list of [{id, title, start, end, filename, filepath}]
     """
-    # Extract video ID for folder name
-    video_id = _extract_video_id(url)
-    folder_name = f"yt_{video_id}" if video_id else "yt_unknown"
-    folder_path = uploads_dir / folder_name
-    folder_path.mkdir(parents=True, exist_ok=True)
-
-    # Stage 1.5: Extract full transcript for the whole video
+    # Stage 0: Get metadata/transcript first to get the video title
     yt_transcript = None
+    video_title = "Unknown Video"
+    video_id = _extract_video_id(url)
+    
     try:
         print("[yt-clipper] Extracting reference transcript for clips…")
         yt_transcript = extract_transcript(url)
+        video_title = yt_transcript.get("video_title", video_title)
+        video_id = yt_transcript.get("video_id", video_id)
     except Exception as e:
-        print(f"[yt-clipper] Warning: Could not extract reference transcript: {e}")
+        print(f"[yt-clipper] Warning: Could not extract reference transcript/metadata: {e}")
+
+    # Stage 1: Create folder named after video title
+    # Sanitize title for folder name (remove illegal characters)
+    clean_title = re.sub(r'[<>:"/\\|?*]', "", video_title).strip()
+    if not clean_title:
+        clean_title = "YouTube Video"
+    
+    # Use Title [video_id] format for uniqueness
+    folder_name = f"{clean_title} [{video_id}]"
+    folder_path = uploads_dir / folder_name
+    folder_path.mkdir(parents=True, exist_ok=True)
 
     if progress_cb:
         progress_cb("cutting", 0)

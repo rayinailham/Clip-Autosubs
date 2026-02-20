@@ -173,8 +173,18 @@ export default {
       }
     }
 
+    const collapsedFolders = ref(new Set());
+    function toggleFolder(folder) {
+      if (collapsedFolders.value.has(folder)) {
+        collapsedFolders.value.delete(folder);
+      } else {
+        collapsedFolders.value.add(folder);
+      }
+    }
+
     return {
       store, uploads, uploadsLoading, dragover, showDiarize, sortMode, processedUploads,
+      collapsedFolders, toggleFolder,
       onFileChange, onDrop, onDragover, onDragleave,
       loadExisting, transcribeExisting, loadPreviousUploads,
       deleteFile, videoURL,
@@ -281,45 +291,50 @@ export default {
           <div v-if="uploadsLoading" class="uploads-loading">Loading…</div>
           <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
           <template v-else v-for="(files, folder) in processedUploads" :key="folder">
-            <div style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border);">
-              📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span>
+            <div class="folder-header" @click="toggleFolder(folder)" 
+                 style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none;">
+              <span>📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span></span>
+              <span style="font-size:0.7rem; color:var(--text-dim);">{{ collapsedFolders.has(folder) ? '▶ Expand' : '▼ Collapse' }}</span>
             </div>
-            <div v-for="f in files" :key="f.filename" class="upload-item">
-            <div class="upload-item-thumb">
-              <video
-                :src="videoURL(f.filename)"
-                preload="metadata"
-                muted
-                playsinline
-                class="upload-item-video"
-                @loadedmetadata="e => { e.target.currentTime = 1 }"
-                @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
-                @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
-              ></video>
-            </div>
-            <div class="upload-item-body">
-              <div class="upload-item-name" :title="f.name || f.filename">{{ f.name || f.filename }}</div>
-              <div class="upload-item-meta">
-                {{ f.size_mb }} MB
-                <span v-if="f.has_transcription" class="upload-badge transcribed">✓ Transcribed</span>
-                <span v-else class="upload-badge">Not transcribed</span>
+            
+            <div v-if="!collapsedFolders.has(folder)" class="folder-content">
+              <div v-for="f in files" :key="f.filename" class="upload-item">
+                <div class="upload-item-thumb">
+                  <video
+                    :src="videoURL(f.filename)"
+                    preload="metadata"
+                    muted
+                    playsinline
+                    class="upload-item-video"
+                    @loadedmetadata="e => { e.target.currentTime = 1 }"
+                    @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
+                    @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
+                  ></video>
+                </div>
+                <div class="upload-item-body">
+                  <div class="upload-item-name" :title="f.name || f.filename">{{ f.name || f.filename }}</div>
+                  <div class="upload-item-meta">
+                    {{ f.size_mb }} MB
+                    <span v-if="f.has_transcription" class="upload-badge transcribed">✓ Transcribed</span>
+                    <span v-else class="upload-badge">Not transcribed</span>
+                  </div>
+                  <div class="upload-item-action">
+                    <button v-if="f.has_transcription" class="btn btn-primary btn-sm"
+                            @click="loadExisting(encodeURIComponent(f.filename), encodeURIComponent(f.transcription_file))">
+                      Open ▶
+                    </button>
+                    <button v-else class="btn btn-outline btn-sm"
+                            @click="transcribeExisting(encodeURIComponent(f.filename))">
+                      Transcribe
+                    </button>
+                    <button class="btn btn-ghost btn-sm btn-delete" :title="'Delete ' + f.filename"
+                            @click.stop="deleteFile(f.filename)">
+                      🗑
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div class="upload-item-action">
-                <button v-if="f.has_transcription" class="btn btn-primary btn-sm"
-                        @click="loadExisting(encodeURIComponent(f.filename), encodeURIComponent(f.transcription_file))">
-                  Open ▶
-                </button>
-                <button v-else class="btn btn-outline btn-sm"
-                        @click="transcribeExisting(encodeURIComponent(f.filename))">
-                  Transcribe
-                </button>
-                <button class="btn btn-ghost btn-sm btn-delete" :title="'Delete ' + f.filename"
-                        @click.stop="deleteFile(f.filename)">
-                  🗑
-                </button>
-              </div>
             </div>
-          </div>
           </template>
         </div>
       </div>
