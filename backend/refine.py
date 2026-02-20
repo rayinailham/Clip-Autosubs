@@ -78,19 +78,7 @@ You are a professional video editor and subtitle expert. You will be given a wor
 transcript with timestamps from a video. Perform ALL of the following tasks and \
 return ONLY valid JSON (no markdown, no explanation).
 
-═══ TASK 1 — SMART SUBTITLE GROUPING ═══
-Group words into natural subtitle display chunks that are EASY TO READ as captions.
-Rules (STRICT):
-- Each group: 2–6 words
-- ALWAYS break AFTER sentence-ending punctuation (. ! ?)
-  → The word AFTER a period starts a NEW group
-- Break at natural pauses (commas, colons, semicolons, dashes)
-- Keep short phrases together ("you know", "I mean", "of course")
-- Every word index from 0 to N-1 must appear in exactly one group
-- Indices within each group must be consecutive (no gaps)
-- Groups must be in order (group 2 starts after group 1 ends)
-
-═══ TASK 2 — HOOK IDENTIFICATION ═══
+═══ TASK 1 — HOOK IDENTIFICATION ═══
 Find the single most engaging, "scroll-stopping" moment that would work best as \
 the opening of a short-form vertical video. Prioritize:
 - Surprising or provocative statements
@@ -99,31 +87,38 @@ the opening of a short-form vertical video. Prioritize:
 - Key insights or revelations
 Return the word index range of the hook.
 
-═══ TASK 3 — OVERLAP HANDLING ═══
+═══ TASK 2 — OVERLAP HANDLING ═══
 If there are words with overlapping time ranges (multiple people talking at the \
 same time), decide which words are MORE important and mark the LESS \
 important overlapping words for hiding. If no overlaps exist, return an empty list.
 
-═══ TASK 4 — WASTED TIME REMOVAL ═══
+═══ TASK 3 — WASTED TIME REMOVAL ═══
 Identify portions of the transcript where the speaker is excessively rambling, \
 going off-topic, or just wasting time with unnecessary filler words. Mark the indices \
 of these words to be cut out. Be brutal with cutting out boring parts to maintain \
 audience retention, but do NOT cut out the hook or important context/punchlines. \
 If no words should be cut, return an empty list.
 
-═══ TASK 5 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
+═══ TASK 4 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
 You may be provided with TWO transcripts:
-- SOURCE A (WhisperX): Word-level, but might have misspellings or poor punctuation.
-- SOURCE B (YouTube CC): Might have lower timing precision, but often has better spelling for names, brands, and proper nouns.
+- SOURCE A (WhisperX): Word-level timing, but might have misspellings or poor punctuation.
+- SOURCE B (YouTube CC): Better spelling for names/brands and more natural sentence grouping.
 
 Compare them. If SOURCE B exists, use its spelling and punctuation to correct SOURCE A. Your FINAL 'words' in the output JSON should use the timing from SOURCE A but the optimized text from your hybrid analysis.
 
+═══ TASK 5 — SMART SUBTITLE GROUPING (IMPORTANT) ═══
+Group the REMAINING words into natural subtitle display chunks that are EASY TO READ as captions.
+Rules (STRICT):
+- Exclude ANY word indices you marked in Tasks 2 and 3 (hidden or wasted). Only group the words that are actually kept!
+- MAX 4 words per group (ideal is 2-4 words). DO NOT EXCEED 4 WORDS.
+- ALWAYS break AFTER sentence-ending punctuation (. ! ?)
+  → The word AFTER a period starts a NEW group
+- Break at natural pauses (commas, colons, semicolons, dashes)
+- Keep short phrases together ("you know", "I mean", "of course")
+- Provide the explicit array of `word_indices` for each group, so that gaps from cut words are naturally skipped.
+
 ═══ RESPONSE FORMAT ═══
 {
-  "groups": [
-    {"start_index": 0, "end_index": 2},
-    {"start_index": 3, "end_index": 6}
-  ],
   "hook": {
     "word_index_start": 10,
     "word_index_end": 25,
@@ -133,6 +128,10 @@ Compare them. If SOURCE B exists, use its spelling and punctuation to correct SO
   "wasted_word_ranges": [],
   "optimized_words": [
      {"index": 0, "text": "Corrected word"}
+  ],
+  "groups": [
+    {"word_indices": [0, 1, 2]},
+    {"word_indices": [6, 7]}
   ]
 }
 Note: 'optimized_words' should only be returned if you found corrections to make.
@@ -204,12 +203,16 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
 
 # ─── Validation helpers ─────────────────────────────────────
 
-def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
+def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set) -> list[dict]:
     """
     Validate Gemini-returned groups. If invalid, return None so caller
     falls back to auto-grouping.
     """
     if not groups:
+        return None
+
+    valid_words = set(i for i in range(word_count) if i not in excluded_indices)
+    if not valid_words:
         return None
 
     seen = set()
@@ -220,7 +223,7 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
         else:
             indices = g.get("word_indices", [])
             
-        valid = [i for i in indices if isinstance(i, int) and 0 <= i < word_count]
+        valid = [i for i in indices if isinstance(i, int) and i in valid_words]
         if not valid:
             continue
         # Check for duplicates
@@ -234,12 +237,12 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
             "word_indices": valid,
         })
 
-    # Check coverage — if <80% of words covered, reject
-    if len(seen) < word_count * 0.8:
+    # Check coverage — if <80% of kept words covered, reject
+    if len(seen) < len(valid_words) * 0.8:
         return None
 
     # Fill any gaps
-    missing = [i for i in range(word_count) if i not in seen]
+    missing = [i for i in valid_words if i not in seen]
     if missing:
         # Append missing words to nearest preceding group, or create new group
         for idx in missing:
@@ -261,16 +264,26 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
     return validated
 
 
-def _fallback_groups(words: list[dict], wpg: int = 4) -> list[dict]:
+def _fallback_groups(words: list[dict], excluded_indices: set, wpg: int = 4) -> list[dict]:
     """Simple N-words-per-group fallback."""
     groups = []
-    for i in range(0, len(words), wpg):
-        chunk = words[i : i + wpg]
-        if not chunk:
+    current_group = []
+    
+    for i in range(len(words)):
+        if i in excluded_indices:
             continue
-        groups.append({
-            "word_indices": list(range(i, i + len(chunk))),
-        })
+        current_group.append(i)
+        if len(current_group) >= wpg:
+            groups.append({
+                "word_indices": current_group,
+            })
+            current_group = []
+            
+    if current_group:
+         groups.append({
+             "word_indices": current_group,
+         })
+         
     return groups
 
 
@@ -421,31 +434,7 @@ def refine_video(
             if isinstance(idx, int) and 0 <= idx < len(adjusted_words) and text:
                 adjusted_words[idx]["text"] = text
 
-    # 4b — Groups (validate, fallback if needed)
-    raw_groups = analysis.get("groups", [])
-    validated_groups = _validate_groups(raw_groups, len(adjusted_words))
-
-    if validated_groups:
-        groups = validated_groups
-        log("apply", f"Using {len(groups)} Gemini-generated groups")
-    else:
-        groups = _fallback_groups(adjusted_words)
-        log("apply", f"Gemini groups invalid — using {len(groups)} auto-groups")
-
-    # Attach timing to groups
-    for g in groups:
-        indices = g["word_indices"]
-        gw = [adjusted_words[i] for i in indices if i < len(adjusted_words)]
-        if gw:
-            g["start"] = gw[0]["start"]
-            g["end"] = gw[-1]["end"]
-            if "speaker" not in g:
-                g["speaker"] = gw[0].get("speaker", "SPEAKER_00")
-
-    # 4c — Hook
-    hook = analysis.get("hook", None)
-
-    # 4d — Hidden (overlapping, less-important words)
+    # 4b — Hidden (overlapping, less-important words)
     hidden_indices = []
     for r in analysis.get("hidden_word_ranges", []):
         if isinstance(r, dict):
@@ -458,11 +447,7 @@ def refine_video(
     hidden_indices.extend(analysis.get("hidden_word_indices", []))
     hidden_indices = [i for i in hidden_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
 
-    # 4e — Speakers info
-    seen_speakers = {w.get("speaker", "SPEAKER_00") for w in adjusted_words}
-    speakers = {spk: spk.replace("_", " ").title() for spk in seen_speakers}
-
-    # 4f — Wasted (rambling, unnecessary words)
+    # 4c — Wasted (rambling, unnecessary words)
     wasted_indices = []
     for r in analysis.get("wasted_word_ranges", []):
         if isinstance(r, dict):
@@ -474,6 +459,36 @@ def refine_video(
             wasted_indices.extend(range(r[0], r[1] + 1))
     wasted_indices.extend(analysis.get("wasted_word_indices", []))
     wasted_indices = [i for i in wasted_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
+
+    excluded_indices = set(hidden_indices + wasted_indices)
+
+    # 4d — Groups (validate, fallback if needed)
+    raw_groups = analysis.get("groups", [])
+    validated_groups = _validate_groups(raw_groups, len(adjusted_words), excluded_indices)
+
+    if validated_groups:
+        groups = validated_groups
+        log("apply", f"Using {len(groups)} Gemini-generated groups")
+    else:
+        groups = _fallback_groups(adjusted_words, excluded_indices)
+        log("apply", f"Gemini groups invalid — using {len(groups)} auto-groups")
+
+    # Attach timing to groups
+    for g in groups:
+        indices = g["word_indices"]
+        gw = [adjusted_words[i] for i in indices if i < len(adjusted_words)]
+        if gw:
+            g["start"] = gw[0]["start"]
+            g["end"] = gw[-1]["end"]
+            if "speaker" not in g:
+                g["speaker"] = gw[0].get("speaker", "SPEAKER_00")
+
+    # 4e — Hook
+    hook = analysis.get("hook", None)
+
+    # 4f — Speakers info
+    seen_speakers = {w.get("speaker", "SPEAKER_00") for w in adjusted_words}
+    speakers = {spk: spk.replace("_", " ").title() for spk in seen_speakers}
 
     elapsed = round(time.time() - t0, 1)
     log("done", f"Refine complete in {elapsed}s!")
