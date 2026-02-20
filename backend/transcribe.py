@@ -15,10 +15,10 @@ import warnings
 from pathlib import Path
 
 # Suppress noisy third-party warnings before importing them
-warnings.filterwarnings("ignore", message="torchcodec is not installed")
-warnings.filterwarnings("ignore", message="TensorFloat-32")
+warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed.*")
+warnings.filterwarnings("ignore", message="(?s).*TensorFloat-32.*")
 warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", message="Lightning automatically upgraded")
+warnings.filterwarnings("ignore", message="(?s).*Lightning automatically upgraded.*")
 logging.getLogger("whisperx").setLevel(logging.WARNING)
 logging.getLogger("pyannote").setLevel(logging.WARNING)
 logging.getLogger("lightning").setLevel(logging.WARNING)

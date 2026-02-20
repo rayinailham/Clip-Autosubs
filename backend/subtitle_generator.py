@@ -95,6 +95,23 @@ def get_animation_tags(animation: str, is_highlight: bool, scale: int) -> tuple[
         return "", ""
 
 
+def get_text_width(text: str, font_size: int, letter_spacing: int = 0) -> float:
+    # Approximate proportional widths typical for Impact/bold fonts
+    widths = {
+        'i': 0.25, 'l': 0.25, 'I': 0.25, 'L': 0.45,
+        'f': 0.35, 'j': 0.35, 'r': 0.35, 't': 0.35,
+        'm': 0.75, 'w': 0.75, 'M': 0.75, 'W': 0.75,
+        'O': 0.6, 'Q': 0.6, 'C': 0.55, 'G': 0.6,
+        'A': 0.55, 'V': 0.55, 'Y': 0.55,
+        ' ': 0.3, ',': 0.25, '.': 0.25, '!': 0.3, '-': 0.35,
+    }
+    w = 0.0
+    for char in text:
+        w += widths.get(char, 0.5) * font_size + letter_spacing
+    # Remove one trailing letter_spacing as it applies between chars
+    return max(0, w - letter_spacing) if len(text) > 0 else 0
+
+
 def calculate_word_positions(
     words_text: list,
     font_size: int,
@@ -104,6 +121,7 @@ def calculate_word_positions(
     margin_v: int,
     position: str,
     word_gap: int,
+    letter_spacing: int = 0,
     pos_x: int = 50,
     pos_y: int = 85,
 ) -> dict:
@@ -116,13 +134,10 @@ def calculate_word_positions(
 
     Returns: dict mapping word_index -> (center_x, center_y)
     """
-    # Approximate px width per uppercase character for Impact-style bold fonts.
-    # Bold Impact uppercase averages ~0.72× font size; using a generous estimate
-    # prevents individual words from overflowing the video edge (which causes
-    # libass to wrap mid-word, splitting e.g. "MISSING" into "MISSIN" + "G").
-    char_width = font_size * 0.72
-    # Space between words (one normal space + optional extra hard-spaces)
-    gap_width = char_width * (1 + word_gap * 0.6)
+    # Use proportional font measuring instead of static multiplier
+    # Space between words (CSS equivalent is roughly 0.25 em + user gap)
+    gap_width = font_size * 0.25 + (word_gap * 4)
+
     available_width = video_width - margin_h * 2
 
     # --- pack words into lines (no highlight scale — layout is fixed) ---
@@ -131,7 +146,7 @@ def calculate_word_positions(
     current_width = 0.0
 
     for i, text in enumerate(words_text):
-        w = len(text) * char_width
+        w = get_text_width(text, font_size, letter_spacing)
         needed = w if not current_line else gap_width + w
         if current_line and current_width + needed > available_width:
             lines.append(current_line)
@@ -304,6 +319,7 @@ def generate_ass(
                     margin_v=margin_v,
                     position=position,
                     word_gap=word_gap,
+                    letter_spacing=letter_spacing,
                 )
                 total_words = max(len(words_text_list), 1)
                 word_interval = min(speed / total_words / 1000.0, 0.1)
@@ -428,6 +444,7 @@ def generate_ass(
                         margin_v=margin_v,
                         position=position,
                         word_gap=word_gap,
+                        letter_spacing=letter_spacing,
                     )
                     total_words = max(len(words_text_list), 1)
                     stagger = speed / total_words / 1000.0
@@ -476,6 +493,7 @@ def generate_ass(
             margin_v=margin_v,
             position=position,
             word_gap=word_gap,
+            letter_spacing=letter_spacing,
             pos_x=pos_x,
             pos_y=pos_y,
         )

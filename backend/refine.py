@@ -78,16 +78,7 @@ You are a professional video editor and subtitle expert. You will be given a wor
 transcript with timestamps from a video. Perform ALL of the following tasks and \
 return ONLY valid JSON (no markdown, no explanation).
 
-═══ TASK 1 — SPEAKER IDENTIFICATION ═══
-Analyze the dialogue for different speakers. Look at:
-- Conversation turn-taking patterns
-- Topic shifts, "I" vs "you" references
-- Question–response pairs
-- Timestamps gaps that indicate a speaker change
-Assign each word to SPEAKER_1, SPEAKER_2, etc. If only one person is talking, \
-assign everything to SPEAKER_1.
-
-═══ TASK 2 — SMART SUBTITLE GROUPING ═══
+═══ TASK 1 — SMART SUBTITLE GROUPING ═══
 Group words into natural subtitle display chunks that are EASY TO READ as captions.
 Rules (STRICT):
 - Each group: 2–6 words
@@ -95,12 +86,11 @@ Rules (STRICT):
   → The word AFTER a period starts a NEW group
 - Break at natural pauses (commas, colons, semicolons, dashes)
 - Keep short phrases together ("you know", "I mean", "of course")
-- Never mix speakers in one group — speaker boundary = group boundary
 - Every word index from 0 to N-1 must appear in exactly one group
 - Indices within each group must be consecutive (no gaps)
 - Groups must be in order (group 2 starts after group 1 ends)
 
-═══ TASK 3 — HOOK IDENTIFICATION ═══
+═══ TASK 2 — HOOK IDENTIFICATION ═══
 Find the single most engaging, "scroll-stopping" moment that would work best as \
 the opening of a short-form vertical video. Prioritize:
 - Surprising or provocative statements
@@ -109,19 +99,19 @@ the opening of a short-form vertical video. Prioritize:
 - Key insights or revelations
 Return the word index range of the hook.
 
-═══ TASK 4 — OVERLAP HANDLING ═══
-If different speakers have words with overlapping time ranges (they talked at the \
-same time), decide which speaker's words are MORE important and mark the LESS \
+═══ TASK 3 — OVERLAP HANDLING ═══
+If there are words with overlapping time ranges (multiple people talking at the \
+same time), decide which words are MORE important and mark the LESS \
 important overlapping words for hiding. If no overlaps exist, return an empty list.
 
-═══ TASK 5 — WASTED TIME REMOVAL ═══
+═══ TASK 4 — WASTED TIME REMOVAL ═══
 Identify portions of the transcript where the speaker is excessively rambling, \
 going off-topic, or just wasting time with unnecessary filler words. Mark the indices \
 of these words to be cut out. Be brutal with cutting out boring parts to maintain \
 audience retention, but do NOT cut out the hook or important context/punchlines. \
 If no words should be cut, return an empty list.
 
-═══ TASK 6 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
+═══ TASK 5 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
 You may be provided with TWO transcripts:
 - SOURCE A (WhisperX): Word-level, but might have misspellings or poor punctuation.
 - SOURCE B (YouTube CC): Might have lower timing precision, but often has better spelling for names, brands, and proper nouns.
@@ -130,17 +120,9 @@ Compare them. If SOURCE B exists, use its spelling and punctuation to correct SO
 
 ═══ RESPONSE FORMAT ═══
 {
-  "speakers": {
-    "SPEAKER_1": "Brief description",
-    "SPEAKER_2": "Brief description"
-  },
-  "word_speakers": [
-    {"start_index": 0, "end_index": 3, "speaker": "SPEAKER_1"},
-    {"start_index": 4, "end_index": 6, "speaker": "SPEAKER_2"}
-  ],
   "groups": [
-    {"start_index": 0, "end_index": 2, "speaker": "SPEAKER_1"},
-    {"start_index": 3, "end_index": 6, "speaker": "SPEAKER_2"}
+    {"start_index": 0, "end_index": 2},
+    {"start_index": 3, "end_index": 6}
   ],
   "hook": {
     "word_index_start": 10,
@@ -250,7 +232,6 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
             seen.add(i)
         validated.append({
             "word_indices": valid,
-            "speaker": g.get("speaker", "SPEAKER_1"),
         })
 
     # Check coverage — if <80% of words covered, reject
@@ -272,7 +253,6 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
             if not placed:
                 validated.append({
                     "word_indices": [idx],
-                    "speaker": "SPEAKER_1",
                 })
 
     # Sort groups by first word index
@@ -290,7 +270,6 @@ def _fallback_groups(words: list[dict], wpg: int = 4) -> list[dict]:
             continue
         groups.append({
             "word_indices": list(range(i, i + len(chunk))),
-            "speaker": chunk[0].get("speaker", "SPEAKER_1"),
         })
     return groups
 
@@ -427,21 +406,10 @@ def refine_video(
     # ── Step 4: Apply results ───────────────────────────────
     log("apply", "Applying refinements…")
 
-    # 4a — Speaker labels
-    speaker_map: dict[int, str] = {}
-    for seg in analysis.get("word_speakers", []):
-        speaker = seg.get("speaker", "SPEAKER_1")
-        if "start_index" in seg and "end_index" in seg:
-            indices = list(range(seg["start_index"], seg["end_index"] + 1))
-        else:
-            indices = seg.get("indices", [])
-        
-        for idx in indices:
-            if isinstance(idx, int) and 0 <= idx < len(adjusted_words):
-                speaker_map[idx] = speaker
-
-    for i, w in enumerate(adjusted_words):
-        w["speaker"] = speaker_map.get(i, "SPEAKER_1")
+    # 4a — Ensure default speakers
+    for w in adjusted_words:
+        if "speaker" not in w:
+            w["speaker"] = "SPEAKER_00"
 
     # 4a-bis — Optimized words (Hybrid mode using reference)
     optimized = analysis.get("optimized_words", [])
@@ -472,7 +440,7 @@ def refine_video(
             g["start"] = gw[0]["start"]
             g["end"] = gw[-1]["end"]
             if "speaker" not in g:
-                g["speaker"] = gw[0].get("speaker", "SPEAKER_1")
+                g["speaker"] = gw[0].get("speaker", "SPEAKER_00")
 
     # 4c — Hook
     hook = analysis.get("hook", None)
@@ -480,21 +448,32 @@ def refine_video(
     # 4d — Hidden (overlapping, less-important words)
     hidden_indices = []
     for r in analysis.get("hidden_word_ranges", []):
-        if len(r) == 2:
+        if isinstance(r, dict):
+            start_idx = r.get("start_index", r.get("word_index_start"))
+            end_idx = r.get("end_index", r.get("word_index_end"))
+            if start_idx is not None and end_idx is not None:
+                hidden_indices.extend(range(start_idx, end_idx + 1))
+        elif isinstance(r, (list, tuple)) and len(r) >= 2:
             hidden_indices.extend(range(r[0], r[1] + 1))
     hidden_indices.extend(analysis.get("hidden_word_indices", []))
-    hidden_indices = [i for i in hidden_indices if 0 <= i < len(adjusted_words)]
+    hidden_indices = [i for i in hidden_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
 
     # 4e — Speakers info
-    speakers = analysis.get("speakers", {"SPEAKER_1": "Speaker 1"})
+    seen_speakers = {w.get("speaker", "SPEAKER_00") for w in adjusted_words}
+    speakers = {spk: spk.replace("_", " ").title() for spk in seen_speakers}
 
     # 4f — Wasted (rambling, unnecessary words)
     wasted_indices = []
     for r in analysis.get("wasted_word_ranges", []):
-        if len(r) == 2:
+        if isinstance(r, dict):
+            start_idx = r.get("start_index", r.get("word_index_start"))
+            end_idx = r.get("end_index", r.get("word_index_end"))
+            if start_idx is not None and end_idx is not None:
+                wasted_indices.extend(range(start_idx, end_idx + 1))
+        elif isinstance(r, (list, tuple)) and len(r) >= 2:
             wasted_indices.extend(range(r[0], r[1] + 1))
     wasted_indices.extend(analysis.get("wasted_word_indices", []))
-    wasted_indices = [i for i in wasted_indices if 0 <= i < len(adjusted_words)]
+    wasted_indices = [i for i in wasted_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
 
     elapsed = round(time.time() - t0, 1)
     log("done", f"Refine complete in {elapsed}s!")
