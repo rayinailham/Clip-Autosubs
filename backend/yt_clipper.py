@@ -122,17 +122,39 @@ def _extract_via_transcript_api(url: str) -> dict:
 
     print(f"[yt-clipper] Trying youtube_transcript_api for {video_id}…")
 
-    # Fetch transcript via the API
-    ytt_api = YouTubeTranscriptApi()
-    transcript = ytt_api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+    # Fetch transcript list via the API
+    # In version 1.2.4, the method is '.list(video_id)' on an instance
+    transcript_list = YouTubeTranscriptApi().list(video_id)
+    
+    # Identify the best transcript:
+    # 1. Prefer manually created original language
+    # 2. Fall back to auto-generated original language
+    # 3. Fall back to any Japanese/English version
+    # 4. Fall back to the first available
+    try:
+        transcript = transcript_list.find_manually_created_transcript()
+    except Exception:
+        try:
+            # Prefer the primary generated language
+            transcript = transcript_list.find_generated_transcript()
+        except Exception:
+            try:
+                # Specific search for common languages
+                transcript = transcript_list.find_transcript(["ja", "en", "en-US"])
+            except Exception:
+                # Just take whatever is first
+                transcript = next(iter(transcript_list))
+    
+    print(f"[yt-clipper] Using transcript language: {transcript.language} ({'auto-generated' if transcript.is_generated else 'manual'})")
+    entries = transcript.fetch()
 
     segments = []
-    for entry in transcript.snippets:
-        text = entry.text.strip()
+    for entry in entries:
+        text = entry["text"].strip()
         if not text or text.startswith("[") or text.startswith("♪"):
             continue
-        start = round(entry.start, 2)
-        end = round(entry.start + entry.duration, 2)
+        start = round(entry["start"], 2)
+        end = round(entry["start"] + entry["duration"], 2)
         segments.append({"start": start, "end": end, "text": text})
 
     if not segments:
@@ -148,6 +170,7 @@ def _extract_via_transcript_api(url: str) -> dict:
                 "quiet": True,
                 "no_warnings": True,
                 "source_address": "0.0.0.0",  # force IPv4
+                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             }
             with yt_dlp.YoutubeDL(meta_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
@@ -196,13 +219,17 @@ def extract_transcript(url: str) -> dict:
                     "skip_download": True,
                     "writesubtitles": True,
                     "writeautomaticsub": True,
-                    "subtitleslangs": ["en", "en-US", "en-GB", "en-orig"],
+                    # "all" might be too much, but "" or ".*" usually works to find what's there
+                    # We prioritize the original language and English/Japanese
+                    "subtitleslangs": [".*"],
                     "subtitlesformat": "json3/vtt/best",
                     "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
                     "quiet": True,
                     "no_warnings": True,
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "referer": "https://www.youtube.com/",
                     # ── Anti-429 options ──
-                    "sleep_interval_subtitles": 3,   # wait 3s between subtitle requests
+                    "sleep_interval_subtitles": 7,   # even longer delay
                     "source_address": "0.0.0.0",     # force IPv4
                 }
 
