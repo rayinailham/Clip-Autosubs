@@ -135,23 +135,22 @@ Compare them. If SOURCE B exists, use its spelling and punctuation to correct SO
     "SPEAKER_2": "Brief description"
   },
   "word_speakers": [
-    {"indices": [0,1,2,3], "speaker": "SPEAKER_1"},
-    {"indices": [4,5,6], "speaker": "SPEAKER_2"}
+    {"start_index": 0, "end_index": 3, "speaker": "SPEAKER_1"},
+    {"start_index": 4, "end_index": 6, "speaker": "SPEAKER_2"}
   ],
   "groups": [
-    {"word_indices": [0,1,2], "speaker": "SPEAKER_1"},
-    {"word_indices": [3,4,5,6], "speaker": "SPEAKER_2"}
+    {"start_index": 0, "end_index": 2, "speaker": "SPEAKER_1"},
+    {"start_index": 3, "end_index": 6, "speaker": "SPEAKER_2"}
   ],
   "hook": {
     "word_index_start": 10,
     "word_index_end": 25,
     "reason": "Why this is the best hook"
   },
-  "hidden_word_indices": [],
-  "wasted_word_indices": [],
+  "hidden_word_ranges": [],
+  "wasted_word_ranges": [],
   "optimized_words": [
-     {"index": 0, "text": "Corrected word"},
-     ...
+     {"index": 0, "text": "Corrected word"}
   ]
 }
 Note: 'optimized_words' should only be returned if you found corrections to make.
@@ -201,6 +200,7 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
         config=genai_types.GenerateContentConfig(
             system_instruction=_REFINE_SYSTEM_PROMPT,
             temperature=0.15,
+            response_mime_type="application/json",
         ),
     )
 
@@ -233,7 +233,11 @@ def _validate_groups(groups: list[dict], word_count: int) -> list[dict]:
     seen = set()
     validated = []
     for g in groups:
-        indices = g.get("word_indices", [])
+        if "start_index" in g and "end_index" in g:
+            indices = list(range(g["start_index"], g["end_index"] + 1))
+        else:
+            indices = g.get("word_indices", [])
+            
         valid = [i for i in indices if isinstance(i, int) and 0 <= i < word_count]
         if not valid:
             continue
@@ -427,7 +431,12 @@ def refine_video(
     speaker_map: dict[int, str] = {}
     for seg in analysis.get("word_speakers", []):
         speaker = seg.get("speaker", "SPEAKER_1")
-        for idx in seg.get("indices", []):
+        if "start_index" in seg and "end_index" in seg:
+            indices = list(range(seg["start_index"], seg["end_index"] + 1))
+        else:
+            indices = seg.get("indices", [])
+        
+        for idx in indices:
             if isinstance(idx, int) and 0 <= idx < len(adjusted_words):
                 speaker_map[idx] = speaker
 
@@ -469,19 +478,23 @@ def refine_video(
     hook = analysis.get("hook", None)
 
     # 4d — Hidden (overlapping, less-important words)
-    hidden_indices = [
-        i for i in analysis.get("hidden_word_indices", [])
-        if isinstance(i, int) and 0 <= i < len(adjusted_words)
-    ]
+    hidden_indices = []
+    for r in analysis.get("hidden_word_ranges", []):
+        if len(r) == 2:
+            hidden_indices.extend(range(r[0], r[1] + 1))
+    hidden_indices.extend(analysis.get("hidden_word_indices", []))
+    hidden_indices = [i for i in hidden_indices if 0 <= i < len(adjusted_words)]
 
     # 4e — Speakers info
     speakers = analysis.get("speakers", {"SPEAKER_1": "Speaker 1"})
 
     # 4f — Wasted (rambling, unnecessary words)
-    wasted_indices = [
-        i for i in analysis.get("wasted_word_indices", [])
-        if isinstance(i, int) and 0 <= i < len(adjusted_words)
-    ]
+    wasted_indices = []
+    for r in analysis.get("wasted_word_ranges", []):
+        if len(r) == 2:
+            wasted_indices.extend(range(r[0], r[1] + 1))
+    wasted_indices.extend(analysis.get("wasted_word_indices", []))
+    wasted_indices = [i for i in wasted_indices if 0 <= i < len(adjusted_words)]
 
     elapsed = round(time.time() - t0, 1)
     log("done", f"Refine complete in {elapsed}s!")

@@ -314,7 +314,7 @@ async def transcribe_endpoint(
 
 # ─── Video Serving ───────────────────────────────────────────
 
-@app.get("/video/{filename}")
+@app.get("/video/{filename:path}")
 async def serve_video(filename: str):
     """Stream an uploaded video file for the browser player."""
     file_path = UPLOAD_DIR / filename
@@ -513,7 +513,7 @@ async def get_render_status(render_id: str):
     return render_jobs[render_id]
 
 
-@app.get("/rendered/{filename}")
+@app.get("/rendered/{filename:path}")
 async def download_rendered(filename: str):
     """Download a rendered video."""
     file_path = RENDERED_DIR / filename
@@ -528,10 +528,11 @@ async def list_rendered():
     files = []
     for f in RENDERED_DIR.iterdir():
         if f.is_file() and f.suffix == ".mp4":
+            rel_path = f.relative_to(RENDERED_DIR).as_posix()
             files.append({
-                "filename": f.name,
+                "filename": rel_path,
                 "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
-                "url": f"/rendered/{f.name}",
+                "url": f"/rendered/{rel_path}",
             })
     return {"files": files}
 
@@ -542,51 +543,79 @@ async def list_rendered():
 async def list_uploads():
     """List all uploaded video/audio files with their transcription and style status."""
     files = []
-    for f in UPLOAD_DIR.iterdir():
+    for f in UPLOAD_DIR.rglob("*"):
         if f.is_file() and f.suffix.lower() in ALLOWED_EXTENSIONS:
-            transcription_json = OUTPUT_DIR / (f.stem + "_transcription.json")
-            style_json = OUTPUT_DIR / (f.stem + "_style.json")
-            has_transcription = transcription_json.exists()
-            has_style = style_json.exists()
+            rel_path = f.relative_to(UPLOAD_DIR).as_posix()
+            
+            # Assume transcription json is in matching folder structure inside outputs
+            rel_parent = f.parent.relative_to(UPLOAD_DIR)
+            transcription_path = OUTPUT_DIR / rel_parent / (f.stem + "_transcription.json")
+            style_path = OUTPUT_DIR / rel_parent / (f.stem + "_style.json")
+            
+            # Fallback to root if not found (for older files)
+            if not transcription_path.exists():
+                transcription_path = OUTPUT_DIR / (f.stem + "_transcription.json")
+            if not style_path.exists():
+                style_path = OUTPUT_DIR / (f.stem + "_style.json")
+
+            has_transcription = transcription_path.exists()
+            has_style = style_path.exists()
+            
             files.append({
-                "filename": f.name,
+                "filename": rel_path,
+                "name": f.name,
+                "folder": rel_parent.as_posix() if str(rel_parent) != "." else "",
                 "size_mb": round(f.stat().st_size / (1024 * 1024), 1),
+                "created_at": f.stat().st_ctime,
                 "has_transcription": has_transcription,
-                "transcription_file": (f.stem + "_transcription.json") if has_transcription else None,
+                "transcription_file": transcription_path.relative_to(OUTPUT_DIR).as_posix() if has_transcription else None,
                 "has_style": has_style,
-                "style_file": (f.stem + "_style.json") if has_style else None,
+                "style_file": style_path.relative_to(OUTPUT_DIR).as_posix() if has_style else None,
             })
-    files.sort(key=lambda x: x["filename"])
+    files.sort(key=lambda x: x["created_at"], reverse=True)
     return {"files": files}
 
 
-@app.delete("/uploads/{filename}")
+@app.delete("/uploads/{filename:path}")
 async def delete_upload(filename: str):
     """Delete an uploaded video and its associated transcription / style files."""
     video_path = UPLOAD_DIR / filename
     if not video_path.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {filename}")
 
-    stem = Path(filename).stem
+    p_filename = Path(filename)
+    stem = p_filename.stem
+    rel_parent = p_filename.parent
     deleted = []
 
     try:
         video_path.unlink()
         deleted.append(filename)
+        # remove parent dir if empty
+        if video_path.parent != UPLOAD_DIR and not any(video_path.parent.iterdir()):
+            video_path.parent.rmdir()
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"Could not delete video: {e}")
 
     # Remove transcription JSON if present
-    transcription_path = OUTPUT_DIR / f"{stem}_transcription.json"
+    transcription_path = OUTPUT_DIR / rel_parent / f"{stem}_transcription.json"
+    if not transcription_path.exists():
+        transcription_path = OUTPUT_DIR / f"{stem}_transcription.json" # fallback
+        
     if transcription_path.exists():
         try:
             transcription_path.unlink()
             deleted.append(transcription_path.name)
+            if transcription_path.parent != OUTPUT_DIR and not any(transcription_path.parent.iterdir()):
+                transcription_path.parent.rmdir()
         except OSError:
             pass
 
     # Remove style JSON if present
-    style_path = OUTPUT_DIR / f"{stem}_style.json"
+    style_path = OUTPUT_DIR / rel_parent / f"{stem}_style.json"
+    if not style_path.exists():
+        style_path = OUTPUT_DIR / f"{stem}_style.json"
+
     if style_path.exists():
         try:
             style_path.unlink()
@@ -648,7 +677,7 @@ async def save_style_endpoint(payload: SaveStyleRequest):
 
 # ─── Outputs (JSON) ─────────────────────────────────────────
 
-@app.get("/outputs/{filename}")
+@app.get("/outputs/{filename:path}")
 async def download_output(filename: str):
     """Download a generated JSON file."""
     file_path = OUTPUT_DIR / filename
@@ -661,12 +690,13 @@ async def download_output(filename: str):
 async def list_outputs():
     """List all generated output files."""
     files = []
-    for f in OUTPUT_DIR.iterdir():
+    for f in OUTPUT_DIR.rglob("*"):
         if f.is_file() and f.suffix == ".json":
+            rel_path = f.relative_to(OUTPUT_DIR).as_posix()
             files.append({
-                "filename": f.name,
+                "filename": rel_path,
                 "size_kb": round(f.stat().st_size / 1024, 1),
-                "url": f"/outputs/{f.name}",
+                "url": f"/outputs/{rel_path}",
             })
     return {"files": files}
 

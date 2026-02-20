@@ -1,4 +1,4 @@
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import store, { regenerateAutoGroups, resetSpeakerColors } from '../store.js';
 import { fetchUploads, uploadAndTranscribe, transcribeExistingFile, loadTranscriptionJSON, videoURL, deleteUpload } from '../api.js';
 
@@ -9,6 +9,24 @@ export default {
     const uploadsLoading = ref(true);
     const dragover = ref(false);
     const showDiarize = ref(false);
+    const sortMode = ref('newest');
+
+    const processedUploads = computed(() => {
+      let list = [...uploads.value];
+      if (sortMode.value === 'newest') list.sort((a,b) => (b.created_at || 0) - (a.created_at || 0));
+      if (sortMode.value === 'oldest') list.sort((a,b) => (a.created_at || 0) - (b.created_at || 0));
+      if (sortMode.value === 'size') list.sort((a,b) => b.size_mb - a.size_mb);
+      if (sortMode.value === 'name') list.sort((a,b) => a.filename.localeCompare(b.filename));
+
+      // Group by folder
+      const groups = {};
+      list.forEach(f => {
+        const fn = f.folder || 'Root Uploads';
+        if (!groups[fn]) groups[fn] = [];
+        groups[fn].push(f);
+      });
+      return groups;
+    });
 
     // Diarization settings (persist via store)
     if (!store.diarization) {
@@ -156,7 +174,7 @@ export default {
     }
 
     return {
-      store, uploads, uploadsLoading, dragover, showDiarize,
+      store, uploads, uploadsLoading, dragover, showDiarize, sortMode, processedUploads,
       onFileChange, onDrop, onDragover, onDragleave,
       loadExisting, transcribeExisting, loadPreviousUploads,
       deleteFile, videoURL,
@@ -247,14 +265,26 @@ export default {
 
       <!-- Previous Uploads -->
       <div class="previous-uploads">
-        <div class="prev-uploads-header">
-          <h3>Previously Uploaded</h3>
-          <button class="btn btn-outline btn-sm" @click="loadPreviousUploads">↻ Refresh</button>
+        <div class="prev-uploads-header" style="display:flex; justify-content:space-between; align-items:center;">
+          <h3>File Manager (Uploads)</h3>
+          <div style="display:flex; gap:0.5rem; align-items:center;">
+            <select v-model="sortMode" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 0.8rem;">
+              <option value="newest">Latest</option>
+              <option value="oldest">Oldest</option>
+              <option value="size">Largest size</option>
+              <option value="name">A-Z</option>
+            </select>
+            <button class="btn btn-outline btn-sm" @click="loadPreviousUploads">↻ Refresh</button>
+          </div>
         </div>
-        <div class="uploads-list">
+        <div class="uploads-list" style="margin-top:0.5rem;">
           <div v-if="uploadsLoading" class="uploads-loading">Loading…</div>
           <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
-          <div v-else v-for="f in uploads" :key="f.filename" class="upload-item">
+          <template v-else v-for="(files, folder) in processedUploads" :key="folder">
+            <div style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border);">
+              📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span>
+            </div>
+            <div v-for="f in files" :key="f.filename" class="upload-item">
             <div class="upload-item-thumb">
               <video
                 :src="videoURL(f.filename)"
@@ -268,7 +298,7 @@ export default {
               ></video>
             </div>
             <div class="upload-item-body">
-              <div class="upload-item-name" :title="f.filename">{{ f.filename }}</div>
+              <div class="upload-item-name" :title="f.name || f.filename">{{ f.name || f.filename }}</div>
               <div class="upload-item-meta">
                 {{ f.size_mb }} MB
                 <span v-if="f.has_transcription" class="upload-badge transcribed">✓ Transcribed</span>
@@ -290,6 +320,7 @@ export default {
               </div>
             </div>
           </div>
+          </template>
         </div>
       </div>
     </div>

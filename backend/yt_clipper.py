@@ -123,7 +123,7 @@ def _extract_via_transcript_api(url: str) -> dict:
     print(f"[yt-clipper] Trying youtube_transcript_api for {video_id}…")
 
     # Fetch transcript list via the API
-    # In version 1.2.4, the method is '.list(video_id)' on an instance
+    # Must use an instance as 'list' is a bound method
     transcript_list = YouTubeTranscriptApi().list(video_id)
     
     # Identify the best transcript:
@@ -149,12 +149,21 @@ def _extract_via_transcript_api(url: str) -> dict:
 
     segments = []
     for entry in entries:
-        text = entry["text"].strip()
+        # Handle both dict-like and object-like entries (fix for 'FetchedTranscriptSnippet' not subscriptable)
+        try:
+            text = entry["text"].strip()
+            start = float(entry["start"])
+            duration = float(entry["duration"])
+        except (TypeError, KeyError, AttributeError):
+            text = getattr(entry, "text", "").strip()
+            start = float(getattr(entry, "start", 0.0))
+            duration = float(getattr(entry, "duration", 0.0))
+
         if not text or text.startswith("[") or text.startswith("♪"):
             continue
-        start = round(entry["start"], 2)
-        end = round(entry["start"] + entry["duration"], 2)
-        segments.append({"start": start, "end": end, "text": text})
+        
+        end = round(start + duration, 2)
+        segments.append({"start": round(start, 2), "end": end, "text": text})
 
     if not segments:
         raise RuntimeError("youtube_transcript_api returned empty transcript.")
@@ -163,22 +172,29 @@ def _extract_via_transcript_api(url: str) -> dict:
     title = "Unknown Video"
     duration = 0.0
     if YT_DLP_AVAILABLE:
-        try:
-            meta_opts = {
-                "skip_download": True,
-                "quiet": True,
-                "no_warnings": True,
-                "source_address": "0.0.0.0",  # force IPv4
-                "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            }
-            with yt_dlp.YoutubeDL(meta_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                title = info.get("title", title)
-                duration = float(info.get("duration") or 0)
-        except Exception:
-            # If even metadata fails, use what we have
-            if segments:
-                duration = segments[-1]["end"]
+        # Try with cookies first, then without if they fail (e.g. locked database)
+        for use_cookies in [True, False]:
+            try:
+                meta_opts = {
+                    "skip_download": True,
+                    "quiet": True,
+                    "no_warnings": True,
+                    "source_address": "0.0.0.0",
+                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
+                if use_cookies:
+                    meta_opts["cookiesfrombrowser"] = ["chrome"]
+                
+                with yt_dlp.YoutubeDL(meta_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    title = info.get("title", title)
+                    duration = float(info.get("duration") or 0)
+                    break # Success!
+            except Exception as e:
+                if not use_cookies: # Last attempt failed
+                    print(f"[yt-clipper] Warning: Metadata extraction failed: {e}")
+                    if segments:
+                        duration = segments[-1]["end"]
 
     return {
         "video_title": title,
@@ -226,6 +242,7 @@ def extract_transcript(url: str) -> dict:
                     "no_warnings": True,
                     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "referer": "https://www.youtube.com/",
+                    "cookiesfrombrowser": ["chrome"], # Use Chrome as requested by user - as list to avoid yt-dlp bug
                     # ── Anti-429 options ──
                     "sleep_interval_subtitles": 7,   # even longer delay
                     "source_address": "0.0.0.0",     # force IPv4
@@ -477,18 +494,40 @@ def download_video(url: str, output_dir: Path, progress_cb=None) -> Path:
                 if total:
                     progress_cb(int(downloaded / total * 100))
 
-    ydl_opts = {
-        "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
-        "merge_output_format": "mp4",
-        "outtmpl": outtmpl,
-        "quiet": True,
-        "no_warnings": True,
-        "progress_hooks": [_ProgressHook()],
-    }
+    # Try downloading with cookies first, fallback to no-cookies if database is locked
+    for use_cookies in [True, False]:
+        try:
+            ydl_opts = {
+                "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
+                "merge_output_format": "mp4",
+                "outtmpl": outtmpl,
+                "quiet": True,
+                "no_warnings": True,
+                "progress_hooks": [_ProgressHook()],
+            }
+            if use_cookies:
+                ydl_opts["cookiesfrombrowser"] = ["chrome"]
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        video_id = info["id"]
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                video_id = info["id"]
+                break # Success!
+        except Exception as e:
+            err_msg = str(e)
+            is_lock_error = "Could not copy" in err_msg and "cookie" in err_msg
+            is_bot_error = "confirm you’re not a bot" in err_msg or "429" in err_msg or "Sign in" in err_msg
+
+            if use_cookies and (is_lock_error or "access is denied" in err_msg.lower()):
+                print("[yt-clipper] Cookie database is locked (is your browser open?). Trying download without cookies…")
+                continue
+            
+            if is_bot_error:
+                raise RuntimeError(
+                    "YouTube is blocking the download (bot detection).\n"
+                    "FIX: Close your browser (Edge/Chrome) completely so the script can access your login cookies, then try again."
+                )
+            if not use_cookies:
+                raise RuntimeError(f"Video download failed: {e}")
 
     # Find the downloaded file
     matches = list(output_dir.glob(f"{video_id}_source.*"))
@@ -568,6 +607,12 @@ def download_and_cut_clips(
 
         source_file = download_video(url, tmp_path, progress_cb=_dl_progress)
 
+        # Extract video ID for folder name
+        video_id = _extract_video_id(url)
+        folder_name = f"yt_{video_id}" if video_id else "yt_unknown"
+        folder_path = uploads_dir / folder_name
+        folder_path.mkdir(parents=True, exist_ok=True)
+
         # Stage 1.5: Extract full transcript for the whole video (to split for clips later)
         # This will be used as a "reference" for the Refine stage.
         yt_transcript = None
@@ -587,7 +632,7 @@ def download_and_cut_clips(
             safe_title = re.sub(r'[<>:"/\\|?*]', "", clip["title"])[:50].strip()
             safe_title = re.sub(r"\s+", "_", safe_title)
             filename = f"yt_{clip['id']:02d}_{safe_title}.mp4"
-            out_path = uploads_dir / filename
+            out_path = folder_path / filename
 
             cut_clip(source_file, clip["start"], clip["end"], out_path)
 
@@ -619,7 +664,7 @@ def download_and_cut_clips(
                 "start": clip["start"],
                 "end": clip["end"],
                 "duration": clip.get("duration", round(clip["end"] - clip["start"], 2)),
-                "filename": filename,
+                "filename": f"{folder_name}/{filename}",
             })
 
             if progress_cb:

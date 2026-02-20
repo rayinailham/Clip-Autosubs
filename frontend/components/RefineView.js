@@ -16,6 +16,28 @@ export default {
     const progress = ref({ step: '', message: '' });
     const error = ref('');
     const pollTimer = ref(null);
+    const sortMode = ref('newest');
+
+    const processedUploads = computed(() => {
+      let list = [...uploads.value];
+      if (sortMode.value === 'newest') list.sort((a,b) => (b.created_at || 0) - (a.created_at || 0));
+      if (sortMode.value === 'oldest') list.sort((a,b) => (a.created_at || 0) - (b.created_at || 0));
+      if (sortMode.value === 'size') list.sort((a,b) => {
+          const sizeA = typeof a.size_mb === 'number' ? a.size_mb : 0;
+          const sizeB = typeof b.size_mb === 'number' ? b.size_mb : 0;
+          return sizeB - sizeA;
+      });
+      if (sortMode.value === 'name') list.sort((a,b) => a.filename.localeCompare(b.filename));
+
+      // Group by folder
+      const groups = {};
+      list.forEach(f => {
+        const fn = f.folder || 'Root Uploads';
+        if (!groups[fn]) groups[fn] = [];
+        groups[fn].push(f);
+      });
+      return groups;
+    });
 
     const STEP_ORDER = ['init', 'transcribe', 'silence', 'analyze', 'apply', 'done'];
     const STEP_LABELS = {
@@ -254,6 +276,7 @@ export default {
       progress, error, progressPct, stepIndex,
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
+      sortMode, processedUploads,
     };
   },
   template: `
@@ -326,17 +349,29 @@ export default {
 
         <!-- Previous Uploads -->
         <div class="previous-uploads">
-          <div class="prev-uploads-header">
-            <h3>Previously Uploaded</h3>
-            <button class="btn btn-outline btn-sm" @click="loadUploads">↻ Refresh</button>
+          <div class="prev-uploads-header" style="display:flex; justify-content:space-between; align-items:center;">
+            <h3>File Manager (Uploads)</h3>
+            <div style="display:flex; gap:0.5rem; align-items:center;">
+              <select v-model="sortMode" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 0.8rem;">
+                <option value="newest">Latest</option>
+                <option value="oldest">Oldest</option>
+                <option value="size">Largest size</option>
+                <option value="name">A-Z</option>
+              </select>
+              <button class="btn btn-outline btn-sm" @click="loadUploads">↻ Refresh</button>
+            </div>
           </div>
-          <div class="uploads-list">
+          <div class="uploads-list" style="margin-top:0.5rem;">
             <div v-if="loading" class="uploads-loading">Loading…</div>
             <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
-            <div v-else v-for="f in uploads" :key="f.filename" class="upload-item" 
-                 @click="selectedFile = f.filename; uploadFile = null" 
-                 :style="selectedFile === f.filename ? 'border-color: #f7b733; box-shadow: 0 4px 20px rgba(247, 183, 51, 0.4); transform: translateY(-4px);' : ''" 
-                 style="cursor: pointer; position: relative;">
+            <template v-else v-for="(files, folder) in processedUploads" :key="folder">
+              <div style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border);">
+                📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span>
+              </div>
+              <div v-for="f in files" :key="f.filename" class="upload-item" 
+                   @click="selectedFile = f.filename; uploadFile = null" 
+                   :style="selectedFile === f.filename ? 'border-color: #f7b733; box-shadow: 0 4px 20px rgba(247, 183, 51, 0.4); transform: translateY(-4px);' : ''" 
+                   style="cursor: pointer; position: relative;">
               <div class="upload-item-thumb">
                 <video
                   :src="videoURL(f.filename)"
@@ -350,13 +385,14 @@ export default {
                 ></video>
               </div>
               <div class="upload-item-body">
-                <div class="upload-item-name" :title="f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.filename }}</div>
+                <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.name || f.filename }}</div>
                 <div class="upload-item-meta">
                   {{ f.size_mb }}{{ f.size_mb === 'Rendered' ? '' : ' MB' }}
                   <span v-if="selectedFile === f.filename" style="margin-left: auto; color: #f7b733; font-weight: bold; background: rgba(247,183,51,0.1); padding: 2px 6px; border-radius: 4px;">Selected</span>
                 </div>
               </div>
             </div>
+            </template>
           </div>
         </div>
       </template>
