@@ -1,11 +1,11 @@
 """
-VTuber Short Renderer — builds a 9:16 vertical video from a single source clip.
+Split-screen Short Renderer — builds a 9:16 vertical video from a single source clip.
 
 Layout (top-to-bottom):
   ┌───────────────┐
-  │  Gameplay     │  ← top 40%  (user-defined crop/zoom)
+  │  Top section  │  ← user-defined ratio  (user-defined crop/zoom)
   ├───────────────┤
-  │  Avatar       │  ← bottom 60% (user-defined crop/zoom)
+  │  Bot section  │  ← remaining %         (user-defined crop/zoom)
   └───────────────┘
 
 Pan values are percentages (−100 … +100) of the maximum possible pan range
@@ -86,6 +86,7 @@ def _compute_crop(
 def render_vtuber_short(
     video_path: str,
     output_path: str,
+    split_ratio: int = 40,
     top_zoom: float = 1.0,
     top_pan_x: float = 0.0,
     top_pan_y: float = 0.0,
@@ -99,14 +100,15 @@ def render_vtuber_short(
     progress_cb=None,
 ) -> str:
     """
-    Render a vertical VTuber short from a single source video.
+    Render a vertical split-screen short from a single source video.
 
     Parameters
     ----------
     video_path   : source video file
     output_path  : destination .mp4
-    top_*        : crop/zoom params for gameplay section (top 40%)
-    bottom_*     : crop/zoom params for avatar section (bottom 60%)
+    split_ratio  : percentage of the output height for the top section (20-80)
+    top_*        : crop/zoom params for top section
+    bottom_*     : crop/zoom params for bottom section
     out_width/height : final canvas size (default 1080×1920)
     """
     video_path = Path(video_path).resolve()
@@ -120,9 +122,10 @@ def render_vtuber_short(
     info = get_video_info(str(video_path))
     src_w, src_h = info["width"], info["height"]
 
-    # ── Section heights ──────────────────────────────────────
-    top_h    = int(out_height * 0.40)   # gameplay  (top  40 %)
-    bottom_h = out_height - top_h       # avatar    (bot  60 %)
+    # ── Section heights (from user-defined ratio) ──────────────────
+    ratio = max(20, min(80, split_ratio)) / 100.0
+    top_h    = int(out_height * ratio)   # top section
+    bottom_h = out_height - top_h       # bottom section
 
     if progress_cb:
         progress_cb(f"Source: {src_w}×{src_h}  →  output: {out_width}×{out_height}")

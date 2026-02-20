@@ -1,5 +1,5 @@
 import { ref, onMounted } from 'vue';
-import store, { regenerateAutoGroups } from '../store.js';
+import store, { regenerateAutoGroups, resetSpeakerColors } from '../store.js';
 import { fetchUploads, uploadAndTranscribe, transcribeExistingFile, loadTranscriptionJSON, videoURL, deleteUpload } from '../api.js';
 
 export default {
@@ -8,6 +8,46 @@ export default {
     const uploads = ref([]);
     const uploadsLoading = ref(true);
     const dragover = ref(false);
+    const showDiarize = ref(false);
+
+    // Diarization settings (persist via store)
+    if (!store.diarization) {
+      store.diarization = {
+        hfToken: '',
+        maxSpeakers: null,
+      };
+    }
+
+    function getDiarizeOpts() {
+      const opts = {};
+      const token = (store.diarization.hfToken || '').trim();
+      if (token) opts.hf_token = token;
+      const maxSp = store.diarization.maxSpeakers;
+      if (maxSp && maxSp > 0) opts.max_speakers = maxSp;
+      return opts;
+    }
+
+    function populateSpeakers(result) {
+      // Reset color assignments for new transcription
+      resetSpeakerColors();
+      // Auto-populate store.speakers from word data
+      const speakerSet = new Set();
+      for (const w of (result.words || [])) {
+        if (w.speaker) speakerSet.add(w.speaker);
+      }
+      if (speakerSet.size > 0) {
+        const speakers = {};
+        const sorted = [...speakerSet].sort();
+        const labels = ['Speaker 1', 'Speaker 2', 'Speaker 3', 'Speaker 4', 'Speaker 5'];
+        sorted.forEach((spk, i) => {
+          speakers[spk] = labels[i] || `Speaker ${i + 1}`;
+        });
+        store.speakers = speakers;
+        console.log(`[diarization] Detected ${sorted.length} speakers:`, sorted);
+      } else {
+        store.speakers = {};
+      }
+    }
 
     async function loadPreviousUploads() {
       uploadsLoading.value = true;
@@ -31,10 +71,11 @@ export default {
       store.progressText = 'Uploading & transcribing…';
       store.progressFile = file.name;
       try {
-        const result = await uploadAndTranscribe(file);
+        const result = await uploadAndTranscribe(file, getDiarizeOpts());
         store.words = result.words || [];
         store.metadata = result.metadata || {};
         store.videoFilename = file.name;
+        populateSpeakers(result);
         openEditor();
       } catch (err) {
         alert('Error: ' + err.message);
@@ -68,6 +109,7 @@ export default {
         store.words = result.words || [];
         store.metadata = result.metadata || {};
         store.videoFilename = decodeURIComponent(encodedVideo);
+        populateSpeakers(result);
         openEditor();
       } catch (e) {
         alert('Failed to load transcription: ' + e.message);
@@ -80,10 +122,11 @@ export default {
       store.progressText = 'Transcribing…';
       store.progressFile = filename;
       try {
-        const result = await transcribeExistingFile(filename);
+        const result = await transcribeExistingFile(filename, getDiarizeOpts());
         store.words = result.words || [];
         store.metadata = result.metadata || {};
         store.videoFilename = filename;
+        populateSpeakers(result);
         openEditor();
       } catch (err) {
         alert('Error: ' + err.message);
@@ -113,7 +156,7 @@ export default {
     }
 
     return {
-      store, uploads, uploadsLoading, dragover,
+      store, uploads, uploadsLoading, dragover, showDiarize,
       onFileChange, onDrop, onDragover, onDragleave,
       loadExisting, transcribeExisting, loadPreviousUploads,
       deleteFile, videoURL,
@@ -140,6 +183,43 @@ export default {
           <span class="upload-icon">🎬</span>
           <h2>Drop a video or audio file</h2>
           <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV — up to 500 MB</p>
+        </div>
+      </div>
+
+      <!-- Speaker Diarization Options -->
+      <div class="diarize-options" style="max-width: 560px; width: 100%; margin-top: 1rem;">
+        <button class="btn btn-ghost btn-sm" @click="showDiarize = !showDiarize"
+                style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim);">
+          <span style="font-size: 0.6rem;">{{ showDiarize ? '▼' : '▶' }}</span>
+          🎤 Speaker Diarization
+          <span v-if="store.diarization.hfToken" style="color: var(--success); font-size: 0.65rem;">● Active</span>
+        </button>
+        <div v-if="showDiarize" class="diarize-panel"
+             style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+                    padding: 0.75rem 1rem; margin-top: 0.35rem;">
+          <p style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.5rem; line-height: 1.45;">
+            Enable speaker detection by providing a
+            <a href="https://huggingface.co/settings/tokens" target="_blank"
+               style="color: var(--accent2);">HuggingFace token</a>
+            with access to
+            <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank"
+               style="color: var(--accent2);">pyannote/speaker-diarization-3.1</a>.
+          </p>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <input type="password" v-model="store.diarization.hfToken"
+                   placeholder="hf_xxxxxxxxxx…"
+                   style="flex: 1; padding: 6px 10px; background: var(--surface2); border: 1px solid var(--border);
+                          border-radius: 5px; color: var(--text); font-size: 0.8rem; outline: none;
+                          font-family: monospace;" />
+            <label style="font-size: 0.72rem; color: var(--text-dim); white-space: nowrap;">
+              Max speakers
+              <input type="number" v-model.number="store.diarization.maxSpeakers"
+                     min="2" max="10" placeholder="auto"
+                     style="width: 50px; padding: 5px 6px; margin-left: 4px; background: var(--surface2);
+                            border: 1px solid var(--border); border-radius: 5px; color: var(--text);
+                            font-size: 0.8rem; text-align: center; outline: none;" />
+            </label>
+          </div>
         </div>
       </div>
 

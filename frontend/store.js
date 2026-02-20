@@ -58,11 +58,14 @@ const store = reactive({
     animation: 'color-only',
     groupAnimation: 'pop-in',
     animSpeed: 300,
+    animIntensity: 100,
     sentenceAnimation: 'fade-in',
     staticAnimSpeed: 300,
     position: 'bottom',
     marginV: 60,
     marginH: 10,
+    posX: 50,        // 0-100% horizontal position (50 = center)
+    posY: 85,        // 0-100% vertical position (85 = near bottom)
     letterSpacing: 0,
     wordGap: 0,
     wpg: 4,
@@ -124,9 +127,11 @@ const store = reactive({
     step: 'mode',    // 'mode' | 'upload' | 'editor'
     // Shorts mode: 'vtuber' | 'zoomed' | 'blur_bg' | 'black_bg'
     shortsMode: 'vtuber',
+    // Split-screen ratio: top section percentage (20-80)
+    splitRatio: 40,
     // Single-section zoom/pan (used by 'zoomed' mode)
     single: { zoom: 1.0, panX: 0, panY: 0 },
-    // VTuber split-screen sections
+    // Split-screen sections
     top: { zoom: 1.0, panX: 0, panY: 0 },
     bottom: { zoom: 1.0, panX: 0, panY: 0 },
     render: {
@@ -156,6 +161,12 @@ const store = reactive({
     result: null,      // full result from backend when done
   },
 
+  // ── Diarization settings ───────────────────────
+  diarization: {
+    hfToken: '',
+    maxSpeakers: null,
+  },
+
   // ── Speaker data ──────────────────────────
   speakers: {},          // e.g. { SPEAKER_1: 'Host', SPEAKER_2: 'Guest' }
   hiddenWordIndices: [], // word indices to hide (overlapping speech)
@@ -166,15 +177,41 @@ export default store;
 
 // ── Speaker color palette ───────────────────
 
+const SPEAKER_PALETTE = [
+  { bg: 'rgba(124, 92, 252, 0.30)', border: 'rgba(124, 92, 252, 0.65)', text: '#7C5CFC', label: '#b4a0ff' },
+  { bg: 'rgba(76, 175, 80, 0.30)',  border: 'rgba(76, 175, 80, 0.65)',  text: '#4CAF50', label: '#81C784' },
+  { bg: 'rgba(255, 152, 0, 0.30)',  border: 'rgba(255, 152, 0, 0.65)',  text: '#FF9800', label: '#FFB74D' },
+  { bg: 'rgba(233, 30, 99, 0.30)',  border: 'rgba(233, 30, 99, 0.65)',  text: '#E91E63', label: '#F06292' },
+  { bg: 'rgba(0, 188, 212, 0.30)',  border: 'rgba(0, 188, 212, 0.65)',  text: '#00BCD4', label: '#4DD0E1' },
+];
+
+// Legacy compat: map old keys too
 export const SPEAKER_COLORS = {
-  SPEAKER_1: { bg: 'rgba(124, 92, 252, 0.30)', border: 'rgba(124, 92, 252, 0.65)', text: '#7C5CFC', label: '#b4a0ff' },
-  SPEAKER_2: { bg: 'rgba(76, 175, 80, 0.30)',  border: 'rgba(76, 175, 80, 0.65)',  text: '#4CAF50', label: '#81C784' },
-  SPEAKER_3: { bg: 'rgba(255, 152, 0, 0.30)',  border: 'rgba(255, 152, 0, 0.65)',  text: '#FF9800', label: '#FFB74D' },
-  SPEAKER_4: { bg: 'rgba(233, 30, 99, 0.30)',  border: 'rgba(233, 30, 99, 0.65)',  text: '#E91E63', label: '#F06292' },
+  SPEAKER_1: SPEAKER_PALETTE[0],
+  SPEAKER_2: SPEAKER_PALETTE[1],
+  SPEAKER_3: SPEAKER_PALETTE[2],
+  SPEAKER_4: SPEAKER_PALETTE[3],
 };
 
+// Dynamic color assignment by index for any speaker ID format
+const _speakerColorCache = {};
 export function getSpeakerColor(speaker) {
-  return SPEAKER_COLORS[speaker] || SPEAKER_COLORS.SPEAKER_1;
+  if (_speakerColorCache[speaker]) return _speakerColorCache[speaker];
+  // Try legacy map first
+  if (SPEAKER_COLORS[speaker]) {
+    _speakerColorCache[speaker] = SPEAKER_COLORS[speaker];
+    return SPEAKER_COLORS[speaker];
+  }
+  // Assign by order of appearance
+  const idx = Object.keys(_speakerColorCache).length;
+  const color = SPEAKER_PALETTE[idx % SPEAKER_PALETTE.length];
+  _speakerColorCache[speaker] = color;
+  return color;
+}
+
+// Reset color cache when speakers change (call on new transcription load)
+export function resetSpeakerColors() {
+  Object.keys(_speakerColorCache).forEach(k => delete _speakerColorCache[k]);
 }
 
 export function getUniqueSpeakers() {
@@ -336,12 +373,15 @@ export function getStyleConfig() {
     position: s.position,
     margin_v: s.marginV || 60,
     margin_h: s.marginH || 10,
+    pos_x: s.posX != null ? s.posX : 50,
+    pos_y: s.posY != null ? s.posY : 85,
     letter_spacing: s.letterSpacing || 0,
     word_gap: s.wordGap || 0,
     scale_highlight: s.scale || 100,
     animation: s.animation,
     group_animation: s.groupAnimation,
     anim_speed: s.animSpeed || 200,
+    anim_intensity: s.animIntensity != null ? s.animIntensity : 100,
     sentence_animation: s.sentenceAnimation || 'fade-in',
     static_anim_speed: s.staticAnimSpeed || 300,
     uppercase: s.uppercase,

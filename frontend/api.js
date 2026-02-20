@@ -18,9 +18,13 @@ export async function loadTranscriptionJSON(encodedJson) {
   return res.json();
 }
 
-export async function uploadAndTranscribe(file) {
+export async function uploadAndTranscribe(file, diarizeOpts = {}) {
   const formData = new FormData();
   formData.append('file', file);
+  // Optional diarization fields
+  if (diarizeOpts.hf_token) formData.append('hf_token', diarizeOpts.hf_token);
+  if (diarizeOpts.min_speakers != null) formData.append('min_speakers', String(diarizeOpts.min_speakers));
+  if (diarizeOpts.max_speakers != null) formData.append('max_speakers', String(diarizeOpts.max_speakers));
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
   if (!res.ok) {
     const err = await res.json();
@@ -29,11 +33,15 @@ export async function uploadAndTranscribe(file) {
   return res.json();
 }
 
-export async function transcribeExistingFile(filename) {
+export async function transcribeExistingFile(filename, diarizeOpts = {}) {
+  const body = { filename };
+  if (diarizeOpts.hf_token) body.hf_token = diarizeOpts.hf_token;
+  if (diarizeOpts.min_speakers != null) body.min_speakers = diarizeOpts.min_speakers;
+  if (diarizeOpts.max_speakers != null) body.max_speakers = diarizeOpts.max_speakers;
   const res = await fetch('/transcribe-existing', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) {
     const err = await res.json();

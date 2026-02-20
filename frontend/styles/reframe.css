@@ -274,8 +274,8 @@
   flex-shrink: 0;
 }
 
-.reframe-section--top    { height: 40%; }
-.reframe-section--bottom { height: 60%; }
+/* Heights are set via inline :style bindings from the split ratio slider */
+/* .reframe-section--bottom height is set via inline :style */
 
 .reframe-section-label {
   position: absolute;
@@ -301,7 +301,7 @@
 /* ── Subtitle zone ── */
 .reframe-sub-zone {
   position: absolute;
-  top: 40%;
+  /* top is set via inline :style from split ratio */
   left: 0;
   right: 0;
   height: 0;

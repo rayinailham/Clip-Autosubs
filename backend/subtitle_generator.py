@@ -104,6 +104,8 @@ def calculate_word_positions(
     margin_v: int,
     position: str,
     word_gap: int,
+    pos_x: int = 50,
+    pos_y: int = 85,
 ) -> dict:
     """
     Calculate the absolute center (x, y) for each word in the group.
@@ -146,13 +148,10 @@ def calculate_word_positions(
     line_height = font_size * 1.25  # vertical spacing between lines
     total_block_height = len(lines) * line_height
 
-    if position == "bottom":
-        # bottom of last line sits margin_v above the bottom edge
-        block_top_y = video_height - margin_v - total_block_height
-    elif position == "top":
-        block_top_y = margin_v
-    else:  # center
-        block_top_y = (video_height - total_block_height) / 2
+    # Use pos_x/pos_y percentage to place the block center
+    center_x_px = int(video_width * pos_x / 100)
+    center_y_px = int(video_height * pos_y / 100)
+    block_top_y = center_y_px - total_block_height / 2
 
     # --- assign center (x, y) per word ---
     word_positions: dict[int, tuple[int, int]] = {}
@@ -163,7 +162,7 @@ def calculate_word_positions(
         # total width of this line
         line_word_widths = [w for _, w in line]
         total_line_w = sum(line_word_widths) + gap_width * (len(line) - 1)
-        x_start = (video_width - total_line_w) / 2  # left edge of first word
+        x_start = center_x_px - total_line_w / 2
 
         cursor_x = x_start
         for word_idx, w in line:
@@ -199,10 +198,13 @@ def generate_ass(
     margin_h: int = 10,
     letter_spacing: int = 0,
     word_gap: int = 0,
+    pos_x: int = 50,
+    pos_y: int = 85,
     scale_highlight: int = 100,
     animation: str = "color-only",
     group_animation: str = "none",
     anim_speed: int = 200,
+    anim_intensity: int = 100,
     sentence_animation: str = "fade-in",
     static_anim_speed: int = 200,
     uppercase: bool = True,
@@ -259,14 +261,9 @@ def generate_ass(
 
     # ========== STATIC MODE: Simple sentence subtitles ==========
     if not dynamic_mode:
-        # Pre-compute anchor position for movement-based animations
-        cx_s = video_width // 2
-        if position == "bottom":
-            cy_s = video_height - margin_v
-        elif position == "top":
-            cy_s = margin_v
-        else:
-            cy_s = video_height // 2
+        # Pre-compute anchor position using pos_x/pos_y percentages
+        cx_s = int(video_width * pos_x / 100)
+        cy_s = int(video_height * pos_y / 100)
 
         for group in groups:
             group_words_list = group["words"]
@@ -327,7 +324,8 @@ def generate_ass(
                     )
 
             else:
-                tags = base_color_glow()
+                tags = [f"\\q2\\an5\\pos({cx_s},{cy_s})"]
+                tags.extend(base_color_glow())
 
                 if sentence_animation == "none":
                     pass
@@ -339,28 +337,28 @@ def generate_ass(
                     tags.append(f"\\fscx0\\fscy0\\t(0,{speed},\\fscx100\\fscy100)")
 
                 elif sentence_animation == "slide-up":
-                    offset = font_size
+                    offset = font_size * anim_intensity // 100
                     tags = [
                         f"\\q2\\an5\\move({cx_s},{cy_s + offset},{cx_s},{cy_s},0,{speed})"
                         f"\\c{normal_ass_s}"
                     ] + base_color_glow()[1:]
 
                 elif sentence_animation == "slide-down":
-                    offset = font_size
+                    offset = font_size * anim_intensity // 100
                     tags = [
                         f"\\q2\\an5\\move({cx_s},{cy_s - offset},{cx_s},{cy_s},0,{speed})"
                         f"\\c{normal_ass_s}"
                     ] + base_color_glow()[1:]
 
                 elif sentence_animation == "slide-left":
-                    offset = video_width // 3
+                    offset = (video_width // 3) * anim_intensity // 100
                     tags = [
                         f"\\q2\\an5\\move({cx_s - offset},{cy_s},{cx_s},{cy_s},0,{speed})"
                         f"\\c{normal_ass_s}"
                     ] + base_color_glow()[1:]
 
                 elif sentence_animation == "slide-right":
-                    offset = video_width // 3
+                    offset = (video_width // 3) * anim_intensity // 100
                     tags = [
                         f"\\q2\\an5\\move({cx_s + offset},{cy_s},{cx_s},{cy_s},0,{speed})"
                         f"\\c{normal_ass_s}"
@@ -368,10 +366,11 @@ def generate_ass(
 
                 elif sentence_animation == "bounce":
                     # Drop from above then return to position (two-phase move via sequential events)
-                    overshoot = font_size // 3
+                    drop_offset = font_size * 2 * anim_intensity // 100
+                    overshoot = (font_size // 3) * anim_intensity // 100
                     mid_t = int(speed * 0.65)
                     tags = [
-                        f"\\q2\\an5\\move({cx_s},{cy_s - font_size * 2},{cx_s},{cy_s + overshoot},0,{mid_t})"
+                        f"\\q2\\an5\\move({cx_s},{cy_s - drop_offset},{cx_s},{cy_s + overshoot},0,{mid_t})"
                         f"\\c{normal_ass_s}"
                     ] + base_color_glow()[1:]
                     tags.append(f"\\fad({speed // 4},0)")
@@ -400,12 +399,13 @@ def generate_ass(
                     tags.append(f"\\fscx0\\fscy100\\t(0,{speed},\\fscx100\\fscy100)")
 
                 elif sentence_animation == "zoom-drop":
-                    offset = font_size // 2
+                    offset = (font_size // 2) * anim_intensity // 100
+                    zoom_amt = 100 + (30 * anim_intensity // 100)
                     tags = [
                         f"\\q2\\an5\\move({cx_s},{cy_s - offset},{cx_s},{cy_s},0,{speed})"
                         f"\\c{normal_ass_s}"
                     ] + base_color_glow()[1:]
-                    tags.append(f"\\fscx130\\fscy130\\t(0,{speed},\\fscx100\\fscy100)")
+                    tags.append(f"\\fscx{zoom_amt}\\fscy{zoom_amt}\\t(0,{speed},\\fscx100\\fscy100)")
                     tags.append(f"\\fad({speed // 2},0)")
 
                 elif sentence_animation == "flip-in":
@@ -439,7 +439,9 @@ def generate_ass(
                             w_tags.append(f"\\blur{glow_strength // 2}")
                             w_tags.append(f"\\4c{rgb_to_ass_color(glow_color)}")
                         pop_dur = max(80, speed // 3)
-                        w_tags.append(f"\\fscx0\\fscy0\\t({delay},{delay + pop_dur},\\fscx100\\fscy100)")
+                        zoom_amt = 100 + (30 * anim_intensity // 100) if anim_intensity > 100 else 100
+                        start_scale = max(0, 100 - anim_intensity)
+                        w_tags.append(f"\\fscx{start_scale}\\fscy{start_scale}\\t({delay},{delay + pop_dur},\\fscx100\\fscy100)")
                         events.append(
                             f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,"
                             f"{{{''.join(w_tags)}}}{word_text}"
@@ -474,6 +476,8 @@ def generate_ass(
             margin_v=margin_v,
             position=position,
             word_gap=word_gap,
+            pos_x=pos_x,
+            pos_y=pos_y,
         )
 
         # --- Calculate group animation tags ---
@@ -486,30 +490,34 @@ def generate_ass(
             elif group_animation == "fade-in":
                 return f"\\fad({group_anim_duration},0)"
             elif group_animation == "slide-up":
-                offset = font_size // 2
+                offset = (font_size // 2) * anim_intensity // 100
                 return f"\\move({cx},{cy + offset},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "slide-down":
-                offset = font_size // 2
+                offset = (font_size // 2) * anim_intensity // 100
                 return f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "slide-left":
-                offset = video_width // 3
+                offset = (video_width // 3) * anim_intensity // 100
                 return f"\\move({cx - offset},{cy},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "slide-right":
-                offset = video_width // 3
+                offset = (video_width // 3) * anim_intensity // 100
                 return f"\\move({cx + offset},{cy},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "pop-in":
-                return f"\\fscx0\\fscy0\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+                start_scale = max(0, 100 - anim_intensity)
+                return f"\\fscx{start_scale}\\fscy{start_scale}\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
             elif group_animation == "bounce":
-                offset = font_size
+                offset = font_size * anim_intensity // 100
                 return f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
             elif group_animation == "blur-in":
-                return f"\\blur20\\t(0,{group_anim_duration},\\blur0)"
+                blur_amt = 20 * anim_intensity // 100
+                return f"\\blur{blur_amt}\\t(0,{group_anim_duration},\\blur0)"
             elif group_animation == "stretch":
-                return f"\\fscx0\\fscy100\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+                start_scale = max(0, 100 - anim_intensity)
+                return f"\\fscx{start_scale}\\fscy100\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
             elif group_animation == "zoom-drop":
-                offset = font_size // 2
+                offset = (font_size // 2) * anim_intensity // 100
+                zoom_amt = 100 + (30 * anim_intensity // 100)
                 return (f"\\move({cx},{cy - offset},{cx},{cy},0,{group_anim_duration})"
-                        f"\\fscx130\\fscy130\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
+                        f"\\fscx{zoom_amt}\\fscy{zoom_amt}\\t(0,{group_anim_duration},\\fscx100\\fscy100)"
                         f"\\fad({group_anim_duration // 2},0)")
             elif group_animation == "flip-in":
                 return f"\\fscx0\\t(0,{group_anim_duration},\\fscx100)\\fad({group_anim_duration // 3},0)"

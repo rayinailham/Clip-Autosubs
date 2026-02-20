@@ -74,24 +74,27 @@ export default {
     }
 
     // ── CSS transform helper ────────────────────────────────
-    // Pan is implemented by shifting the transform-origin (the zoom focal point)
-    // rather than translating the element. This ensures the video never leaves
-    // its container bounds, so no black bars are ever visible.
+    // Pan is implemented via object-position (which controls the visible
+    // portion of a cover-cropped video) combined with matching transform-origin
+    // for additional zoom.
     //
-    // At scale(z), the maximum safe origin offset from 50% is:
-    //   maxOff = 50 * (1 - 1/z)   (beyond this you'd see outside the source)
-    // We map panX/panY (−100…+100) linearly into [−maxOff … +maxOff].
+    // panX/panY (−100 … +100) map linearly to object-position (0% … 100%).
+    //   panX = −100 ⇒ show left edge,  panX = +100 ⇒ show right edge
+    //   panY = −100 ⇒ show top edge,   panY = +100 ⇒ show bottom edge
+    //
+    // transform-origin is set to the same percentages so that scale(z)
+    // zooms into the same point the user panned to.
     function sectionStyle(section) {
       const { zoom, panX, panY } = store.reframe[section];
       const z = Math.max(1, zoom);
-      // max origin shift (%) that won't expose black at this zoom level
-      const maxOff = 50 * (1 - 1 / z);
-      const ox = 50 + (panX / 100) * maxOff;
-      const oy = 50 + (panY / 100) * maxOff;
+      // Map pan (−100…+100) → object-position (0%…100%)
+      const opX = 50 + (panX / 100) * 50;
+      const opY = 50 + (panY / 100) * 50;
       return {
-        transform: `scale(${z})`,
-        transformOrigin: `${ox}% ${oy}%`,
+        transform: z > 1 ? `scale(${z})` : 'none',
+        transformOrigin: `${opX}% ${opY}%`,
         objectFit: 'cover',
+        objectPosition: `${opX}% ${opY}%`,
         width: '100%',
         height: '100%',
         position: 'absolute',
@@ -104,7 +107,7 @@ export default {
       zoomed:   'Zoomed',
       blur_bg:  'Blurred Background',
       black_bg: 'Black Background',
-      vtuber:   'VTuber Split-screen',
+      vtuber:   'Split-screen',
     };
 
     function setMode(mode) {
@@ -143,7 +146,8 @@ export default {
         const payload = {
           video_filename: rf.videoFilename,
           shorts_mode: mode,
-          // VTuber split params
+          // Split-screen params
+          split_ratio:  rf.splitRatio,
           top_zoom:     rf.top.zoom,
           top_pan_x:    rf.top.panX,
           top_pan_y:    rf.top.panY,
@@ -207,13 +211,17 @@ export default {
         : ''
     );
 
+    // ── Computed split heights for preview ─────────────────────
+    const topPct = computed(() => store.reframe.splitRatio || 40);
+    const botPct = computed(() => 100 - topPct.value);
+
     return {
       store, uploading, dragover, MODE_LABELS,
       uploads, uploadsLoading, loadPreviousUploads, useExistingUpload, videoURL,
       onFileChange, onDrop, onDragover, onDragleave,
       videoTop, videoBot, playing, syncBot, togglePlay,
       sectionStyle, startRender, closeRender, goHome, setMode, goBack,
-      rr, videoSrc,
+      rr, videoSrc, topPct, botPct,
     };
   },
 
@@ -249,8 +257,8 @@ export default {
 
           <div class="shorts-mode-card" @click="setMode('vtuber')">
             <div class="shorts-mode-icon">&#x1F3AD;</div>
-            <h3>VTuber Split-screen</h3>
-            <p>Split layout — top gameplay (40%) + bottom avatar (60%). Full pan &amp; zoom control.</p>
+            <h3>Split-screen</h3>
+            <p>Split layout — adjustable top/bottom ratio with full pan &amp; zoom control for each section.</p>
           </div>
 
         </div>
@@ -382,11 +390,25 @@ export default {
             </p>
           </template>
 
-          <!-- VTUBER: dual top/bottom -->
+          <!-- SPLIT-SCREEN: dual top/bottom -->
           <template v-else>
+            <!-- Split Ratio slider -->
             <div class="reframe-panel-header">
-              <span class="reframe-panel-badge reframe-panel-badge--top">TOP 40%</span>
-              <h3>Gameplay</h3>
+              <span class="reframe-panel-badge" style="background:rgba(255,215,0,0.2);color:#FFD700;border:1px solid rgba(255,215,0,0.4)">RATIO</span>
+              <h3>Split Ratio</h3>
+            </div>
+            <label class="ctrl-label">Top
+              <span class="ctrl-value">{{ topPct }}% / {{ botPct }}%</span>
+            </label>
+            <input class="ctrl-range" type="range" min="20" max="80" step="1"
+                   :value="store.reframe.splitRatio"
+                   @input="store.reframe.splitRatio = +$event.target.value" />
+
+            <div class="reframe-divider"></div>
+
+            <div class="reframe-panel-header">
+              <span class="reframe-panel-badge reframe-panel-badge--top">TOP {{ topPct }}%</span>
+              <h3>Top Section</h3>
             </div>
 
             <label class="ctrl-label">Zoom
@@ -416,8 +438,8 @@ export default {
             <div class="reframe-divider"></div>
 
             <div class="reframe-panel-header">
-              <span class="reframe-panel-badge reframe-panel-badge--bottom">BOTTOM 60%</span>
-              <h3>Avatar</h3>
+              <span class="reframe-panel-badge reframe-panel-badge--bottom">BOTTOM {{ botPct }}%</span>
+              <h3>Bottom Section</h3>
             </div>
 
             <label class="ctrl-label">Zoom
@@ -457,7 +479,7 @@ export default {
             <div v-if="store.reframe.shortsMode === 'zoomed'" class="reframe-canvas" style="background:#000; overflow:hidden; position:relative;">
               <video :src="videoSrc" ref="videoTop"
                      :style="sectionStyle('single')"
-                     preload="metadata" playsinline muted loop />
+                     preload="metadata" playsinline loop />
             </div>
 
             <!-- BLUR BG preview -->
@@ -467,33 +489,33 @@ export default {
                      preload="metadata" playsinline muted loop />
               <video :src="videoSrc" ref="videoBot"
                      style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;"
-                     preload="metadata" playsinline muted loop />
+                     preload="metadata" playsinline loop />
             </div>
 
             <!-- BLACK BG preview -->
             <div v-else-if="store.reframe.shortsMode === 'black_bg'" class="reframe-canvas" style="background:#000; overflow:hidden; position:relative;">
               <video :src="videoSrc" ref="videoTop"
                      style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;"
-                     preload="metadata" playsinline muted loop />
+                     preload="metadata" playsinline loop />
             </div>
 
-            <!-- VTUBER split preview -->
+            <!-- SPLIT-SCREEN preview -->
             <div v-else class="reframe-canvas">
-              <div class="reframe-section reframe-section--top">
+              <div class="reframe-section" :style="{ height: topPct + '%' }">
                 <video :src="videoSrc" ref="videoTop"
                        :style="sectionStyle('top')"
                        @timeupdate="syncBot"
-                       preload="metadata" playsinline muted loop />
-                <div class="reframe-section-label">Gameplay</div>
+                       preload="metadata" playsinline loop />
+                <div class="reframe-section-label">Top</div>
               </div>
-              <div class="reframe-sub-zone">
+              <div class="reframe-sub-zone" :style="{ top: topPct + '%' }">
                 <span class="reframe-sub-label">Subtitle area</span>
               </div>
-              <div class="reframe-section reframe-section--bottom">
+              <div class="reframe-section" :style="{ height: botPct + '%' }">
                 <video :src="videoSrc" ref="videoBot"
                        :style="sectionStyle('bottom')"
                        preload="metadata" playsinline muted loop />
-                <div class="reframe-section-label reframe-section-label--bottom">Avatar</div>
+                <div class="reframe-section-label reframe-section-label--bottom">Bottom</div>
               </div>
             </div>
 

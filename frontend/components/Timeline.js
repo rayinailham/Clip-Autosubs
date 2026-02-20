@@ -528,10 +528,11 @@ export default {
                    :style="{
                      left: pct(seg.start) + '%',
                      width: Math.max(0.2, pct(seg.end) - pct(seg.start)) + '%',
-                   }"
-                   @click.stop="handleToggleSegment(seg.index)"
-                   :title="(seg.active ? 'Click to remove' : 'Click to keep') + ' segment ' + (seg.index + 1)">
-                <span class="segment-label">{{ seg.active ? '' : '✖' }}</span>
+                   }">
+                <div class="segment-hitbox" @click.stop="handleToggleSegment(seg.index)"
+                     :title="(seg.active ? 'Click to remove' : 'Click to keep') + ' segment ' + (seg.index + 1)">
+                  <span class="segment-label">{{ seg.active ? '' : '✖ CUT' }}</span>
+                </div>
               </div>
             </template>
 

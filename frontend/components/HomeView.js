@@ -74,12 +74,12 @@ export default {
           <p class="home-card-desc">
             Convert any horizontal video into a 9:16 vertical short. Choose
             from four styles: zoomed-in, blurred background, black bars, or
-            the VTuber split-screen layout with custom pan &amp; zoom.
+            the split-screen layout with custom pan &amp; zoom.
           </p>
           <div class="home-card-tags">
             <span class="tag">9:16 vertical</span>
             <span class="tag">Blur / Zoom / Black</span>
-            <span class="tag">VTuber split</span>
+            <span class="tag">Split-screen</span>
           </div>
           <button class="btn btn-accent home-card-btn">Get Started →</button>
         </div>

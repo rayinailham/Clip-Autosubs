@@ -174,16 +174,14 @@ def detect_speech_segments(
     segments: list[tuple[float, float]] = []
 
     for w in words[1:]:
-        w_start = w["start"] - pad
-        w_end = w["end"] + pad
-
-        if w_start - seg_end < min_gap:
+        prev_end = seg_end - pad
+        if w["start"] - prev_end < min_gap:
             # Gap too small → extend current segment
-            seg_end = max(seg_end, w_end)
+            seg_end = max(seg_end, w["end"] + pad)
         else:
             segments.append((max(0.0, seg_start), seg_end))
-            seg_start = max(0.0, w_start)
-            seg_end = w_end
+            seg_start = max(0.0, w["start"] - pad)
+            seg_end = w["end"] + pad
 
     segments.append((max(0.0, seg_start), seg_end))
     return segments

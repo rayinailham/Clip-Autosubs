@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Optional
 
 import torch
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -134,6 +134,8 @@ class StyleConfig(BaseModel):
     position: str = "bottom"  # top, center, bottom
     margin_v: int = 60  # Vertical margin
     margin_h: int = 10  # Horizontal margin
+    pos_x: int = 50     # Horizontal position 0-100%
+    pos_y: int = 85     # Vertical position 0-100%
 
     # Spacing
     letter_spacing: int = 0   # Character spacing (ASS \sp / Style Spacing)
@@ -143,6 +145,7 @@ class StyleConfig(BaseModel):
     animation: str = "color-only"  # none, scale, color-only, bounce
     group_animation: str = "none"  # none, fade-in, slide-up, slide-down, pop-in, typewriter
     anim_speed: int = 200  # Animation duration in ms (dynamic mode)
+    anim_intensity: int = 100  # Multiplier for animation amount (0-100+)
     sentence_animation: str = "fade-in"  # static mode entrance animation
     static_anim_speed: int = 300  # Animation duration in ms (static mode)
 
@@ -152,6 +155,9 @@ class StyleConfig(BaseModel):
 
 class TranscribeExistingRequest(BaseModel):
     filename: str
+    hf_token: Optional[str] = None       # HuggingFace token for diarization
+    min_speakers: Optional[int] = None   # Min speakers (hint)
+    max_speakers: Optional[int] = None   # Max speakers (hint)
 
 
 class CutSilenceRequest(BaseModel):
@@ -170,7 +176,9 @@ class ReframeRequest(BaseModel):
     video_filename: str
     # Mode: 'vtuber' | 'zoomed' | 'blur_bg' | 'black_bg'
     shorts_mode: str = "vtuber"
-    # VTuber split-screen params
+    # Split-screen ratio (top section percentage, 20-80)
+    split_ratio: int = 40
+    # Split-screen params
     top_zoom: float = 1.0
     top_pan_x: float = 0.0   # −100 … +100
     top_pan_y: float = 0.0
@@ -252,8 +260,16 @@ async def system_status():
 # ─── Phase 1: Transcription ─────────────────────────────────
 
 @app.post("/transcribe")
-async def transcribe_endpoint(file: UploadFile = File(...)):
-    """Upload a video/audio file and run WhisperX transcription."""
+async def transcribe_endpoint(
+    file: UploadFile = File(...),
+    hf_token: Optional[str] = Form(None),
+    min_speakers: Optional[int] = Form(None),
+    max_speakers: Optional[int] = Form(None),
+):
+    """Upload a video/audio file and run WhisperX transcription.
+    
+    Optionally provide a HuggingFace token to enable speaker diarization.
+    """
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -279,7 +295,13 @@ async def transcribe_endpoint(file: UploadFile = File(...)):
         )
 
     try:
-        result = transcribe_video(str(upload_path), str(OUTPUT_DIR))
+        result = transcribe_video(
+            str(upload_path),
+            str(OUTPUT_DIR),
+            hf_token=hf_token or None,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
@@ -426,12 +448,15 @@ def _do_render(render_id: str, req: RenderRequest):
             position=req.style.position,
             margin_v=req.style.margin_v,
             margin_h=req.style.margin_h,
+            pos_x=req.style.pos_x,
+            pos_y=req.style.pos_y,
             letter_spacing=req.style.letter_spacing,
             word_gap=req.style.word_gap,
             scale_highlight=req.style.scale_highlight,
             animation=req.style.animation,
             group_animation=req.style.group_animation,
             anim_speed=req.style.anim_speed,
+            anim_intensity=req.style.anim_intensity,
             sentence_animation=req.style.sentence_animation,
             static_anim_speed=req.style.static_anim_speed,
             uppercase=req.style.uppercase,
@@ -583,7 +608,13 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{ext}'")
 
     try:
-        result = transcribe_video(str(upload_path), str(OUTPUT_DIR))
+        result = transcribe_video(
+            str(upload_path),
+            str(OUTPUT_DIR),
+            hf_token=payload.hf_token or None,
+            min_speakers=payload.min_speakers,
+            max_speakers=payload.max_speakers,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
 
@@ -794,10 +825,11 @@ def _do_reframe(job_id: str, req: ReframeRequest):
                 preset=req.preset,
                 progress_cb=progress,
             )
-        else:  # 'vtuber'
+        else:  # 'vtuber' (split-screen)
             render_vtuber_short(
                 video_path=str(video_path),
                 output_path=str(output_path),
+                split_ratio=req.split_ratio,
                 top_zoom=req.top_zoom,
                 top_pan_x=req.top_pan_x,
                 top_pan_y=req.top_pan_y,

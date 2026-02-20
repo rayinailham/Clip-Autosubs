@@ -54,17 +54,25 @@ def get_vram_usage() -> dict:
     }
 
 
-def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
+def transcribe_video(video_path: str, output_dir: str | None = None,
+                     hf_token: str | None = None,
+                     min_speakers: int | None = None,
+                     max_speakers: int | None = None) -> dict:
     """
     Full transcription pipeline:
       1. Load audio from video
       2. Transcribe with WhisperX (batched, int8)
       3. Align to get word-level timestamps
-      4. Return structured JSON
+      4. (Optional) Diarize to assign speaker labels
+      5. Return structured JSON
 
     Args:
         video_path: Path to input video/audio file.
         output_dir:  Directory to write JSON output. If None, uses same dir as video.
+        hf_token:    HuggingFace access token for speaker diarization (pyannote).
+                     If None, diarization is skipped.
+        min_speakers: Minimum expected number of speakers (optional hint).
+        max_speakers: Maximum expected number of speakers (optional hint).
 
     Returns:
         dict with keys: words, metadata
@@ -133,15 +141,65 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
     flush_gpu()
     print(f"[transcribe] VRAM after align flush: {get_vram_usage()}")
 
-    # ── Step 4: Extract word-level data ─────────────────────
+    # ── Step 4: Speaker diarization (optional) ──────────────
+    speakers_detected = 0
+    if hf_token:
+        try:
+            from whisperx.diarize import DiarizationPipeline
+
+            print("[transcribe] Loading diarization model (pyannote)...")
+            diarize_model = DiarizationPipeline(
+                use_auth_token=hf_token,
+                device=DEVICE,
+            )
+            print(f"[transcribe] VRAM after diarize model load: {get_vram_usage()}")
+
+            print("[transcribe] Running speaker diarization...")
+            diarize_kwargs = {}
+            if min_speakers is not None:
+                diarize_kwargs["min_speakers"] = min_speakers
+            if max_speakers is not None:
+                diarize_kwargs["max_speakers"] = max_speakers
+
+            diarize_segments = diarize_model(audio, **diarize_kwargs)
+            result = whisperx.assign_word_speakers(diarize_segments, result)
+
+            # Count unique speakers
+            speaker_set = set()
+            for seg in result.get("segments", []):
+                if seg.get("speaker"):
+                    speaker_set.add(seg["speaker"])
+                for w in seg.get("words", []):
+                    if w.get("speaker"):
+                        speaker_set.add(w["speaker"])
+            speakers_detected = len(speaker_set)
+            print(f"[transcribe] Diarization complete — {speakers_detected} speakers detected")
+
+            del diarize_model
+            flush_gpu()
+            print(f"[transcribe] VRAM after diarize flush: {get_vram_usage()}")
+
+        except ImportError:
+            print("[transcribe] WARNING: whisperx.diarize not available, skipping diarization")
+        except Exception as e:
+            print(f"[transcribe] WARNING: Diarization failed ({e}), continuing without speaker labels")
+    else:
+        print("[transcribe] No HuggingFace token provided — skipping diarization")
+
+    # ── Step 5: Extract word-level data ─────────────────────
     words = []
     for segment in result.get("segments", []):
+        segment_speaker = segment.get("speaker")
         for w in segment.get("words", []):
             word_entry = {
                 "text": w.get("word", "").strip(),
                 "start": round(w.get("start", 0), 3),
                 "end": round(w.get("end", 0), 3),
             }
+            # Add speaker label if available (from word or segment level)
+            speaker = w.get("speaker") or segment_speaker
+            if speaker:
+                word_entry["speaker"] = speaker
             # Only include words that have valid timestamps
             if word_entry["text"] and word_entry["start"] >= 0 and word_entry["end"] > 0:
                 words.append(word_entry)
@@ -159,6 +217,7 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
             "duration_seconds": round(len(audio) / 16000, 2),
             "processing_time_seconds": elapsed,
             "word_count": len(words),
+            "speakers_detected": speakers_detected,
         },
         "words": words,
     }
@@ -170,6 +229,8 @@ def transcribe_video(video_path: str, output_dir: str | None = None) -> dict:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     print(f"[transcribe] Done! {len(words)} words in {elapsed}s")
+    if speakers_detected:
+        print(f"[transcribe]   → {speakers_detected} speaker(s) detected")
     print(f"[transcribe] JSON saved to: {json_path}")
 
     return output

@@ -64,7 +64,7 @@ export default {
         uppercase: p.uppercase, highlight: p.highlight, textColor: p.textColor,
         outlineColor: p.outlineColor, shadowColor: p.shadowColor, outline: p.outline,
         shadow: p.shadow, glow: p.glow, glowColor: p.glowColor, scale: p.scale,
-        animation: p.animation, groupAnimation: p.groupAnimation, animSpeed: p.animSpeed,
+        animation: p.animation, groupAnimation: p.groupAnimation, animSpeed: p.animSpeed, animIntensity: p.animIntensity || 100,
       });
       if (!store.useCustomGroups) regenerateAutoGroups();
     }
@@ -78,7 +78,7 @@ export default {
         uppercase: p.uppercase, textColor: p.textColor,
         outlineColor: p.outlineColor, shadowColor: p.shadowColor, outline: p.outline,
         shadow: p.shadow, glow: p.glow, glowColor: p.glowColor,
-        sentenceAnimation: p.sentenceAnimation, staticAnimSpeed: p.animSpeed,
+        sentenceAnimation: p.sentenceAnimation, staticAnimSpeed: p.animSpeed, animIntensity: p.animIntensity || 100,
       });
       if (!store.useCustomGroups) regenerateAutoGroups();
     }
@@ -144,6 +144,12 @@ export default {
       store.selectedWordIndices.forEach(idx => { delete store.words[idx].style; });
     }
 
+    function onPositionPreset() {
+      const presets = { bottom: 85, center: 50, top: 15 };
+      store.style.posY = presets[store.style.position] || 85;
+      store.style.posX = 50;  // Reset to center X
+    }
+
     return {
       store, currentDynamicPreset, currentStaticPreset,
       dynamicPresetList, staticPresetList, emotionList,
@@ -151,7 +157,7 @@ export default {
       applyDynamicPreset, applyStaticPreset, setSubtitleMode, applyEmotion,
       wordHighlight, wordNormal, wordFontSize, wordOutline,
       selectedWordsInfo, applyWordStyle, clearWordStyles,
-      regenerateAutoGroups,
+      regenerateAutoGroups, onPositionPreset,
     };
   },
   template: `
@@ -214,7 +220,7 @@ export default {
       <div class="style-row">
         <label>Family</label>
         <select v-model="store.style.fontFamily" @change="regenerateAutoGroups">
-          <option value="Bangers">Bangers (VTuber)</option>
+          <option value="Bangers">Bangers</option>
           <option value="Impact">Impact</option>
           <option value="Arial Black">Arial Black</option>
           <option value="Bebas Neue">Bebas Neue</option>
@@ -335,6 +341,11 @@ export default {
         <input type="range" min="100" max="500" v-model.number="store.style.animSpeed" />
         <input type="number" class="range-val-input" v-model.number="store.style.animSpeed" min="100" max="500" /><span class="range-unit">ms</span>
       </div>
+      <div class="style-row">
+        <label>Effects Amt</label>
+        <input type="range" min="0" max="250" v-model.number="store.style.animIntensity" />
+        <input type="number" class="range-val-input" v-model.number="store.style.animIntensity" min="0" max="250" /><span class="range-unit">%</span>
+      </div>
     </div>
 
     <!-- Static Animation -->
@@ -364,6 +375,11 @@ export default {
         <input type="range" min="100" max="500" v-model.number="store.style.staticAnimSpeed" />
         <input type="number" class="range-val-input" v-model.number="store.style.staticAnimSpeed" min="100" max="500" /><span class="range-unit">ms</span>
       </div>
+      <div class="style-row">
+        <label>Effects Amt</label>
+        <input type="range" min="0" max="250" v-model.number="store.style.animIntensity" />
+        <input type="number" class="range-val-input" v-model.number="store.style.animIntensity" min="0" max="250" /><span class="range-unit">%</span>
+      </div>
     </div>
 
     <!-- Spacing -->
@@ -385,22 +401,22 @@ export default {
     <div class="style-section">
       <div class="style-section-title">Position</div>
       <div class="style-row">
-        <label>Vertical</label>
-        <select v-model="store.style.position">
+        <label>Preset</label>
+        <select v-model="store.style.position" @change="onPositionPreset">
           <option value="bottom">Bottom</option>
           <option value="center">Center</option>
           <option value="top">Top</option>
         </select>
       </div>
       <div class="style-row">
-        <label>Margin V</label>
-        <input type="range" min="0" max="200" v-model.number="store.style.marginV" />
-        <input type="number" class="range-val-input" v-model.number="store.style.marginV" min="0" max="200" />
+        <label>X</label>
+        <input type="range" min="0" max="100" v-model.number="store.style.posX" />
+        <input type="number" class="range-val-input" v-model.number="store.style.posX" min="0" max="100" />
       </div>
       <div class="style-row">
-        <label>Margin H</label>
-        <input type="range" min="0" max="200" v-model.number="store.style.marginH" />
-        <input type="number" class="range-val-input" v-model.number="store.style.marginH" min="0" max="200" />
+        <label>Y</label>
+        <input type="range" min="0" max="100" v-model.number="store.style.posY" />
+        <input type="number" class="range-val-input" v-model.number="store.style.posY" min="0" max="100" />
       </div>
     </div>
 

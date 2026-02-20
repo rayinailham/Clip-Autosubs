@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import urllib.request
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,12 @@ try:
     YT_DLP_AVAILABLE = True
 except ImportError:
     YT_DLP_AVAILABLE = False
+
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+    YT_TRANSCRIPT_API_AVAILABLE = True
+except ImportError:
+    YT_TRANSCRIPT_API_AVAILABLE = False
 
 try:
     from google import genai
@@ -90,9 +97,82 @@ def _segments_to_plain_text(segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _extract_video_id(url: str) -> str:
+    """Extract video ID from a YouTube URL."""
+    patterns = [
+        r"(?:v=|/v/|youtu\.be/)([a-zA-Z0-9_-]{11})",
+        r"(?:embed/)([a-zA-Z0-9_-]{11})",
+        r"(?:shorts/)([a-zA-Z0-9_-]{11})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, url)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def _extract_via_transcript_api(url: str) -> dict:
+    """
+    Fallback: use youtube_transcript_api to fetch captions directly.
+    This avoids yt-dlp's subtitle download and its 429 issues.
+    """
+    video_id = _extract_video_id(url)
+    if not video_id:
+        raise RuntimeError(f"Could not extract video ID from URL: {url}")
+
+    print(f"[yt-clipper] Trying youtube_transcript_api for {video_id}…")
+
+    # Fetch transcript via the API
+    ytt_api = YouTubeTranscriptApi()
+    transcript = ytt_api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+
+    segments = []
+    for entry in transcript.snippets:
+        text = entry.text.strip()
+        if not text or text.startswith("[") or text.startswith("♪"):
+            continue
+        start = round(entry.start, 2)
+        end = round(entry.start + entry.duration, 2)
+        segments.append({"start": start, "end": end, "text": text})
+
+    if not segments:
+        raise RuntimeError("youtube_transcript_api returned empty transcript.")
+
+    # We still need video metadata — do a quick yt-dlp info-only call (no subtitle download)
+    title = "Unknown Video"
+    duration = 0.0
+    if YT_DLP_AVAILABLE:
+        try:
+            meta_opts = {
+                "skip_download": True,
+                "quiet": True,
+                "no_warnings": True,
+                "source_address": "0.0.0.0",  # force IPv4
+            }
+            with yt_dlp.YoutubeDL(meta_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                title = info.get("title", title)
+                duration = float(info.get("duration") or 0)
+        except Exception:
+            # If even metadata fails, use what we have
+            if segments:
+                duration = segments[-1]["end"]
+
+    return {
+        "video_title": title,
+        "video_id": video_id,
+        "video_duration": duration,
+        "segments": segments,
+        "plain_text": _segments_to_plain_text(segments),
+    }
+
+
 def extract_transcript(url: str) -> dict:
     """
     Use yt-dlp to pull CC / auto-captions from a YouTube URL.
+    Includes retry logic for 429 rate-limit errors and a fallback to
+    youtube_transcript_api if yt-dlp keeps failing.
+
     Returns:
         {
             "video_title": str,
@@ -106,61 +186,103 @@ def extract_transcript(url: str) -> dict:
     if not YT_DLP_AVAILABLE:
         raise RuntimeError("yt-dlp is not installed. Run: pip install yt-dlp")
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        ydl_opts = {
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["en", "en-US", "en-GB", "en-orig"],
-            "subtitlesformat": "json3/vtt/best",
-            "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
-            "quiet": True,
-            "no_warnings": True,
-        }
+    max_retries = 3
+    last_error = None
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
+    for attempt in range(1, max_retries + 1):
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ydl_opts = {
+                    "skip_download": True,
+                    "writesubtitles": True,
+                    "writeautomaticsub": True,
+                    "subtitleslangs": ["en", "en-US", "en-GB", "en-orig"],
+                    "subtitlesformat": "json3/vtt/best",
+                    "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
+                    "quiet": True,
+                    "no_warnings": True,
+                    # ── Anti-429 options ──
+                    "sleep_interval_subtitles": 3,   # wait 3s between subtitle requests
+                    "source_address": "0.0.0.0",     # force IPv4
+                }
 
-        video_id = info.get("id", "unknown")
-        title = info.get("title", "Unknown Video")
-        duration = float(info.get("duration") or 0)
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
 
-        # Find a subtitle file in the temp dir
-        tmp_path = Path(tmpdir)
-        sub_files = sorted(tmp_path.glob(f"{video_id}*.json3")) or sorted(tmp_path.glob(f"{video_id}*.vtt"))
+                video_id = info.get("id", "unknown")
+                title = info.get("title", "Unknown Video")
+                duration = float(info.get("duration") or 0)
 
-        if not sub_files:
-            # Try without language suffix
-            sub_files = sorted(tmp_path.glob("*.json3")) + sorted(tmp_path.glob("*.vtt"))
+                # Find a subtitle file in the temp dir
+                tmp_path = Path(tmpdir)
+                sub_files = sorted(tmp_path.glob(f"{video_id}*.json3")) or sorted(tmp_path.glob(f"{video_id}*.vtt"))
 
-        if not sub_files:
+                if not sub_files:
+                    # Try without language suffix
+                    sub_files = sorted(tmp_path.glob("*.json3")) + sorted(tmp_path.glob("*.vtt"))
+
+                if not sub_files:
+                    raise RuntimeError(
+                        "No captions found for this video. "
+                        "The video may have no CC or auto-generated subtitles."
+                    )
+
+                sub_file = sub_files[0]
+                raw = sub_file.read_text(encoding="utf-8")
+
+                if sub_file.suffix == ".json3":
+                    try:
+                        parsed_json = json.loads(raw)
+                        segments = _parse_json3(parsed_json)
+                    except json.JSONDecodeError:
+                        segments = _parse_vtt(raw)
+                else:
+                    segments = _parse_vtt(raw)
+
+                if not segments:
+                    raise RuntimeError("Captions were found but could not be parsed.")
+
+                return {
+                    "video_title": title,
+                    "video_id": video_id,
+                    "video_duration": duration,
+                    "segments": segments,
+                    "plain_text": _segments_to_plain_text(segments),
+                }
+
+        except Exception as e:
+            last_error = e
+            error_str = str(e)
+            is_rate_limit = "429" in error_str or "Too Many Requests" in error_str
+
+            if is_rate_limit and attempt < max_retries:
+                wait_secs = 5 * (2 ** (attempt - 1))  # 5s, 10s, 20s
+                print(f"[yt-clipper] 429 rate-limited (attempt {attempt}/{max_retries}), retrying in {wait_secs}s…")
+                time.sleep(wait_secs)
+                continue
+            elif not is_rate_limit:
+                # Non-429 error, don't retry
+                break
+            # else: last attempt failed with 429, fall through to fallback
+
+    # ── Fallback: try youtube_transcript_api ──────────────────────────────────
+    if YT_TRANSCRIPT_API_AVAILABLE:
+        try:
+            print("[yt-clipper] yt-dlp subtitle download failed, trying youtube_transcript_api fallback…")
+            return _extract_via_transcript_api(url)
+        except Exception as fallback_err:
             raise RuntimeError(
-                "No captions found for this video. "
-                "The video may have no CC or auto-generated subtitles."
+                f"Both yt-dlp and youtube_transcript_api failed.\n"
+                f"  yt-dlp error: {last_error}\n"
+                f"  Fallback error: {fallback_err}"
             )
 
-        sub_file = sub_files[0]
-        raw = sub_file.read_text(encoding="utf-8")
-
-        if sub_file.suffix == ".json3":
-            try:
-                parsed_json = json.loads(raw)
-                segments = _parse_json3(parsed_json)
-            except json.JSONDecodeError:
-                segments = _parse_vtt(raw)
-        else:
-            segments = _parse_vtt(raw)
-
-        if not segments:
-            raise RuntimeError("Captions were found but could not be parsed.")
-
-        return {
-            "video_title": title,
-            "video_id": video_id,
-            "video_duration": duration,
-            "segments": segments,
-            "plain_text": _segments_to_plain_text(segments),
-        }
+    # No fallback available, raise original error
+    raise RuntimeError(
+        f"Subtitle download failed after {max_retries} attempts (HTTP 429 rate-limit).\n"
+        f"  Error: {last_error}\n"
+        f"  Fix: install the fallback library with: pip install youtube-transcript-api"
+    )
 
 
 # ─── Gemini Analysis ─────────────────────────────────────────────────────────

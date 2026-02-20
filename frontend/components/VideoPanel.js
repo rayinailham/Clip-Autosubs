@@ -123,24 +123,24 @@ export default {
       const preview = document.getElementById('subtitle-preview');
       if (!preview) return;
 
-      // Margin
-      const marginVASS = s.marginV || 60;
-      const marginHASS = s.marginH || 10;
-      const scaledMarginV = Math.round(marginVASS * displayedHeight / actualHeight);
-      const actualWidth = ve.videoWidth || store.metadata.width || 1920;
-      const displayedWidth = ve.clientWidth || ve.offsetWidth || 1;
-      const scaledMarginH = Math.round(marginHASS * displayedWidth / actualWidth);
+      // Position using posX/posY percentages
+      const posX = s.posX != null ? s.posX : 50;
+      const posY = s.posY != null ? s.posY : 85;
 
-      // Reset padding
-      preview.style.paddingBottom = '';
-      preview.style.paddingTop = '';
-      preview.style.paddingLeft = scaledMarginH + 'px';
-      preview.style.paddingRight = scaledMarginH + 'px';
-      if (s.position === 'bottom') preview.style.paddingBottom = scaledMarginV + 'px';
-      else if (s.position === 'top') preview.style.paddingTop = scaledMarginV + 'px';
+      // Reset all positioning styles on the overlay
+      preview.style.padding = '0';
+      preview.style.left = '';
+      preview.style.top = '';
+      preview.style.transform = '';
+      preview.style.display = '';
+      preview.style.flexDirection = '';
+      preview.style.alignItems = '';
+      preview.style.justifyContent = '';
 
       if (!activeGroup) {
-        preview.innerHTML = '';
+        const pw = preview.querySelector('#subtitle-pos-wrapper');
+        if (pw) pw.innerHTML = '';
+        else preview.innerHTML = '';
         lastGroupKey = null;
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
         return;
@@ -162,11 +162,26 @@ export default {
       preview.style.letterSpacing = (s.letterSpacing || 0) + 'px';
       preview.style.wordSpacing = (s.wordGap || 0) * 4 + 'px';
       preview.style.fontWeight = bold ? 'bold' : 'normal';
-      // We apply textShadow and fontStyle directly to spans below to ensure they work
-      // preview.style.textShadow = textShadow; 
 
       const fontStyle = italic ? 'italic' : 'normal';
       const fontWeight = bold ? 'bold' : 'normal';
+
+      // ── Ensure positioning wrapper exists ──
+      let posWrapper = preview.querySelector('#subtitle-pos-wrapper');
+      if (!posWrapper) {
+        posWrapper = document.createElement('div');
+        posWrapper.id = 'subtitle-pos-wrapper';
+        posWrapper.style.position = 'absolute';
+        posWrapper.style.textAlign = 'center';
+        posWrapper.style.whiteSpace = 'normal';
+        posWrapper.style.wordBreak = 'break-word';
+        posWrapper.style.maxWidth = '90%';
+        preview.appendChild(posWrapper);
+      }
+      // Update position
+      posWrapper.style.left = posX + '%';
+      posWrapper.style.top = posY + '%';
+      posWrapper.style.transform = 'translate(-50%, -50%)';
 
       // ── All animation class names so we can clean them off the container ──
       const ALL_ANIM_CLASSES = [
@@ -186,23 +201,22 @@ export default {
           const animName = store.style.sentenceAnimation || 'none';
           const animSpeedMs = store.style.staticAnimSpeed || 300;
           const animSpeed = animSpeedMs + 'ms';
-          const baseStyle = `color:${textColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}`;
+          const animIntensity = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
+          const baseStyle = `color:${textColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}; --anim-intensity:${animIntensity}`;
 
           if (animName === 'typewriter') {
-            // Reveal each word with a fast fade, staggered across the animSpeed window
             const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
-            preview.innerHTML = words.map((word, i) =>
+            posWrapper.innerHTML = words.map((word, i) =>
               `<span class="subtitle-word subtitle-anim-fade-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
             ).join(' ');
           } else if (animName === 'cascade') {
-            // Staggered pop-in per word
             const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
-            preview.innerHTML = words.map((word, i) =>
+            posWrapper.innerHTML = words.map((word, i) =>
               `<span class="subtitle-word subtitle-anim-pop-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
             ).join(' ');
           } else {
             const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
-            preview.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
+            posWrapper.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
           }
         }
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
@@ -212,25 +226,34 @@ export default {
       // Dynamic mode — track group changes for entrance animations
       const dynamicGroupKey = activeGroup.start + '_' + activeGroup.end;
       const isNewGroup = dynamicGroupKey !== lastGroupKey;
+
+      // Ensure animation wrapper inside posWrapper
+      let animWrapper = posWrapper.querySelector('#subtitle-anim-wrapper');
+      if (!animWrapper) {
+        animWrapper = document.createElement('div');
+        animWrapper.id = 'subtitle-anim-wrapper';
+        posWrapper.appendChild(animWrapper);
+      }
+
       if (isNewGroup) {
         lastGroupKey = dynamicGroupKey;
         groupEntryTime = performance.now();
         const rawAnim = store.style.groupAnimation || 'none';
-        // typewriter / cascade don't work per-span in dynamic mode since innerHTML
-        // is rebuilt every frame — map them to sensible container equivalents
         const groupAnim = rawAnim === 'typewriter' ? 'slide-up'
                         : rawAnim === 'cascade'    ? 'pop-in'
                         : rawAnim;
-        ALL_ANIM_CLASSES.forEach(c => preview.classList.remove(c));
-        void preview.offsetWidth; // force reflow to restart animation
+        ALL_ANIM_CLASSES.forEach(c => animWrapper.classList.remove(c));
+        void animWrapper.offsetWidth; // force reflow to restart animation
         if (groupAnim !== 'none') {
-          preview.style.setProperty('--anim-speed', (store.style.animSpeed || 200) + 'ms');
-          preview.classList.add('subtitle-anim-' + groupAnim);
+          animWrapper.style.setProperty('--anim-speed', (store.style.animSpeed || 200) + 'ms');
+          const ai = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
+          animWrapper.style.setProperty('--anim-intensity', ai.toString());
+          animWrapper.classList.add('subtitle-anim-' + groupAnim);
         }
       }
 
-      // Dynamic mode
-      preview.innerHTML = activeGroup.words.map((w, i) => {
+      // Dynamic mode word spans
+      animWrapper.innerHTML = activeGroup.words.map((w, i) => {
         const text = upper ? w.text.toUpperCase() : w.text;
         const isActive = i === activeIdx;
         const ws = w.style || {};
@@ -308,7 +331,7 @@ export default {
     <div class="video-panel" id="video-container">
       <div class="subtitle-container" id="subtitle-box">
         <video ref="videoEl" id="editor-video" controls></video>
-        <div class="subtitle-overlay" :class="'pos-' + store.style.position" id="subtitle-preview"></div>
+        <div class="subtitle-overlay" id="subtitle-preview"></div>
       </div>
     </div>
   `,
