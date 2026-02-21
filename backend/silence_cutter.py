@@ -38,6 +38,8 @@ def _has_audio_stream(video_path: str) -> bool:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
         return bool(result.stdout.strip())
@@ -120,7 +122,7 @@ def cut_video_segments(
         cmd.extend(["-movflags", "+faststart", str(output_path_p)])
 
         log(f"Cutting {n} segments…")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
 
         if result.returncode != 0:
             stderr_tail = result.stderr[-1200:] if result.stderr else "No stderr"
@@ -355,6 +357,8 @@ def cut_silence(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
 

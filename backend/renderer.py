@@ -37,6 +37,8 @@ def get_video_info(video_path: str) -> dict:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
         info = json.loads(result.stdout)
@@ -112,6 +114,8 @@ def render_video(
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,  # 10 minutes max
     )
 
@@ -134,6 +138,8 @@ def render_video(
             cmd_fallback,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=600,
         )
         if result.returncode != 0:
