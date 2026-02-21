@@ -12,7 +12,8 @@ const store = reactive({
   currentView: 'upload', // 'upload' | 'editor'
 
   // ── Transcription data ──────────────────
-  transcriptionModel: 'large-v2', // 'large-v2' (whisperx) or 'flyfront/anime-whisper-faster' (anime)
+  transcriptionModel: 'large-v2', // 'large-v2' (whisperx) or 'flyfront/anime-whisper-faster' (anime) or 'scribe_v2' (elevenlabs)
+  elevenlabsApiKey: '',
   words: [],
   videoFilename: '',
   metadata: {},

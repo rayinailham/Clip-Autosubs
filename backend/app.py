@@ -156,6 +156,7 @@ class StyleConfig(BaseModel):
 class TranscribeExistingRequest(BaseModel):
     filename: str
     transcription_model: Optional[str] = "large-v2"
+    elevenlabs_api_key: Optional[str] = None
     hf_token: Optional[str] = None       # HuggingFace token for diarization
     min_speakers: Optional[int] = None   # Min speakers (hint)
     max_speakers: Optional[int] = None   # Max speakers (hint)
@@ -214,6 +215,7 @@ class RefineRequest(BaseModel):
     video_filename: str
     gemini_api_key: str
     transcription_model: Optional[str] = "large-v2"
+    elevenlabs_api_key: Optional[str] = None
     min_silence_ms: int = 500
     padding_ms: int = 100
     do_cut_silence: bool = True
@@ -268,6 +270,7 @@ async def system_status():
 async def transcribe_endpoint(
     file: UploadFile = File(...),
     transcription_model: Optional[str] = Form("large-v2"),
+    elevenlabs_api_key: Optional[str] = Form(None),
     hf_token: Optional[str] = Form(None),
     min_speakers: Optional[int] = Form(None),
     max_speakers: Optional[int] = Form(None),
@@ -305,6 +308,7 @@ async def transcribe_endpoint(
             str(upload_path),
             str(OUTPUT_DIR),
             model_id=transcription_model,
+            elevenlabs_api_key=elevenlabs_api_key,
             hf_token=hf_token or None,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
@@ -431,56 +435,53 @@ def _do_render(render_id: str, req: RenderRequest):
         # Get video resolution
         info = get_video_info(str(actual_video_path))
 
-        # Generate ASS subtitle file
-        ass_content = generate_ass(
-            words=words_dicts,
-            video_width=info["width"],
-            video_height=info["height"],
-            words_per_group=req.style.words_per_group,
-            custom_groups=groups_dicts,
-            use_custom_groups=req.style.use_custom_groups,
-            dynamic_mode=req.style.dynamic_mode,
-            font_name=req.style.font_name,
-            font_size=req.style.font_size,
-            bold=req.style.bold,
-            italic=req.style.italic,
-            highlight_color=req.style.highlight_color,
-            normal_color=req.style.normal_color,
-            outline_color=req.style.outline_color,
-            shadow_color=req.style.shadow_color,
-            outline_width=req.style.outline_width,
-            shadow_depth=req.style.shadow_depth,
-            glow_strength=req.style.glow_strength,
-            glow_color=req.style.glow_color,
-            position=req.style.position,
-            margin_v=req.style.margin_v,
-            margin_h=req.style.margin_h,
-            pos_x=req.style.pos_x,
-            pos_y=req.style.pos_y,
-            letter_spacing=req.style.letter_spacing,
-            word_gap=req.style.word_gap,
-            scale_highlight=req.style.scale_highlight,
-            animation=req.style.animation,
-            group_animation=req.style.group_animation,
-            anim_speed=req.style.anim_speed,
-            anim_intensity=req.style.anim_intensity,
-            sentence_animation=req.style.sentence_animation,
-            static_anim_speed=req.style.static_anim_speed,
-            uppercase=req.style.uppercase,
-        )
+        # Generate HTML subtitle file
+        from subtitle_generator import build_custom_groups, group_words
+        from html_renderer import generate_subtitle_html, render_html_sequence_to_video
+        import asyncio
 
-        ass_path = RENDERED_DIR / f"{render_id}_captions.ass"
-        save_ass(ass_content, str(ass_path))
+        if req.style.use_custom_groups and groups_dicts:
+            final_groups = build_custom_groups(words_dicts, groups_dicts)
+        else:
+            final_groups = group_words(words_dicts, req.style.words_per_group)
+
+        html_content = generate_subtitle_html(
+            words=words_dicts,
+            groups=final_groups,
+            style=req.style.model_dump(),
+            width=info["width"],
+            height=info["height"]
+        )
 
         render_jobs[render_id]["status"] = "rendering"
 
         # Render video with subtitles
         output_filename = f"{video_path.stem}_captioned_{render_id}.mp4"
         output_path = RENDERED_DIR / output_filename
+        
+        # Determine fps, default to 60 for smooth animations
+        # We can also read it from info, but 60 is perfectly smooth.
+        duration = info.get("duration", 0)
+        
+        if duration <= 0:
+            raise RuntimeError("Invalid video duration (0s).")
 
-        render_video(str(actual_video_path), str(ass_path), str(output_path))
+        asyncio.run(
+            render_html_sequence_to_video(
+                html_content=html_content,
+                video_path=str(actual_video_path),
+                output_path=str(output_path),
+                duration=duration,
+                width=info["width"],
+                height=info["height"],
+                fps=60,
+                crf=18,
+                progress_callback=lambda p: render_jobs[render_id].update({"progress_pct": p})
+            )
+        )
 
         render_jobs[render_id] = {
+
             "status": "done",
             "filename": output_filename,
             "url": f"/rendered/{output_filename}",
@@ -648,6 +649,7 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
             str(upload_path),
             str(OUTPUT_DIR),
             model_id=payload.transcription_model,
+            elevenlabs_api_key=payload.elevenlabs_api_key,
             hf_token=payload.hf_token or None,
             min_speakers=payload.min_speakers,
             max_speakers=payload.max_speakers,
@@ -1146,6 +1148,7 @@ def _do_refine(job_id: str, req: RefineRequest):
             gemini_api_key=req.gemini_api_key,
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
+            elevenlabs_api_key=req.elevenlabs_api_key,
             min_silence_ms=req.min_silence_ms,
             padding_ms=req.padding_ms,
             do_cut_silence=req.do_cut_silence,

@@ -14,6 +14,7 @@ python-multipart
 
 # --- Utilities ---
 ffmpeg-python
+requests
 
 # --- YouTube Clip Finder ---
 yt-dlp

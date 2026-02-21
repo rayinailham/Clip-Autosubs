@@ -399,6 +399,7 @@ def refine_video(
     gemini_api_key: str,
     req_filename: str = "",
     transcription_model: str = "large-v2",
+    elevenlabs_api_key: Optional[str] = None,
     min_silence_ms: int = 500,
     padding_ms: int = 100,
     do_cut_silence: bool = True,
@@ -435,12 +436,18 @@ def refine_video(
     log("init", f"Starting refine for: {video_path.name}")
 
     # ── Step 1: Transcribe ──────────────────────────────────
-    log("transcribe", "Transcribing video with WhisperX…")
+    if transcription_model == "scribe_v2":
+        log("transcribe", "Transcribing video with ElevenLabs Scribe v2…")
+    elif transcription_model == "flyfront/anime-whisper-faster":
+        log("transcribe", "Transcribing video with Anime-Whisper…")
+    else:
+        log("transcribe", "Transcribing video with WhisperX…")
 
     transcription = transcribe_video(
         str(video_path), 
         output_dir,
-        model_id=transcription_model
+        model_id=transcription_model,
+        elevenlabs_api_key=elevenlabs_api_key
     )
     words = transcription["words"]
     metadata = transcription["metadata"]
