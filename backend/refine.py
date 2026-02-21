@@ -18,6 +18,9 @@ import uuid
 from pathlib import Path
 from typing import Optional, Callable
 
+# For structured output parsing
+from pydantic import BaseModel, Field
+
 try:
     from google import genai
     from google.genai import types as genai_types
@@ -139,6 +142,29 @@ If you return 'optimized_words', ensure the count and order exactly match the in
 """
 
 
+class HookModel(BaseModel):
+    word_index_start: int
+    word_index_end: int
+    reason: str
+
+class WordRangeModel(BaseModel):
+    start_index: int
+    end_index: int
+
+class OptimizedWordModel(BaseModel):
+    index: int
+    text: str
+
+class WordGroupModel(BaseModel):
+    word_indices: list[int]
+
+class RefineResponseModel(BaseModel):
+    hook: Optional[HookModel] = None
+    hidden_word_ranges: list[WordRangeModel] = Field(default_factory=list)
+    wasted_word_ranges: list[WordRangeModel] = Field(default_factory=list)
+    optimized_words: list[OptimizedWordModel] = Field(default_factory=list)
+    groups: list[WordGroupModel] = Field(default_factory=list)
+
 def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optional[str] = None) -> dict:
     """
     Send word-level transcript to Gemini for speaker identification,
@@ -170,7 +196,7 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
 
     prompt_parts.append(
         f"\nTotal words to process: {len(words)}\n"
-        f"Analyze following ALL instructions. Return ONLY valid JSON."
+        f"Analyze following ALL instructions. Return ONLY valid JSON matching the schema."
     )
 
     prompt = "".join(prompt_parts)
@@ -182,6 +208,7 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
             system_instruction=_REFINE_SYSTEM_PROMPT,
             temperature=0.15,
             response_mime_type="application/json",
+            response_schema=RefineResponseModel,
         ),
     )
 
@@ -244,12 +271,12 @@ def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set)
     # Fill any gaps
     missing = [i for i in valid_words if i not in seen]
     if missing:
-        # Append missing words to nearest preceding group, or create new group
+        # Instead of appending indefinitely to the previous group, create minimal valid groups.
+        missing.sort()
         for idx in missing:
-            # Find the group whose last index is just before this idx
             placed = False
             for g in validated:
-                if g["word_indices"][-1] == idx - 1:
+                if g["word_indices"][-1] == idx - 1 and len(g["word_indices"]) < 4:
                     g["word_indices"].append(idx)
                     placed = True
                     break
@@ -261,29 +288,42 @@ def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set)
     # Sort groups by first word index
     validated.sort(key=lambda g: g["word_indices"][0])
 
-    return validated
+    # Final pass: Split any overstuffed groups
+    final_groups = []
+    for g in validated:
+        inds = g["word_indices"]
+        for i in range(0, len(inds), 4):
+            final_groups.append({"word_indices": inds[i:i+4]})
+
+    return final_groups
 
 
 def _fallback_groups(words: list[dict], excluded_indices: set, wpg: int = 4) -> list[dict]:
-    """Simple N-words-per-group fallback."""
+    """Smart N-words-per-group fallback that respects punctuation."""
     groups = []
     current_group = []
-    
+
     for i in range(len(words)):
         if i in excluded_indices:
             continue
+            
         current_group.append(i)
-        if len(current_group) >= wpg:
+        
+        # Check if this word has sentence-ending punctuation or a strong comma
+        text = words[i].get("text", "").strip()
+        has_punct = any(text.endswith(p) for p in [".", "?", "!", ","])
+        
+        if len(current_group) >= wpg or has_punct:
             groups.append({
                 "word_indices": current_group,
             })
             current_group = []
-            
+
     if current_group:
          groups.append({
              "word_indices": current_group,
          })
-         
+
     return groups
 
 
@@ -294,6 +334,7 @@ def refine_video(
     output_dir: str,
     rendered_dir: str,
     gemini_api_key: str,
+    req_filename: str = "",
     transcription_model: str = "large-v2",
     min_silence_ms: int = 500,
     padding_ms: int = 100,
@@ -377,7 +418,7 @@ def refine_video(
         )
     else:
         log("silence", "Skipping silence cutting")
-        output_filename = video_path.name
+        output_filename = req_filename if req_filename else video_path.name
         adjusted_words = words
         duration = metadata.get("duration", 0)
         if not duration and words:
@@ -486,6 +527,10 @@ def refine_video(
 
     # 4d — Groups (validate, fallback if needed)
     raw_groups = analysis.get("groups", [])
+    print(f"[DEBUG] raw_groups length = {len(raw_groups)}")
+    if raw_groups and len(raw_groups) > 0:
+        print(f"[DEBUG] first raw_group = {raw_groups[0]}")
+
     validated_groups = _validate_groups(raw_groups, len(adjusted_words), excluded_indices)
 
     if validated_groups and do_grouping:

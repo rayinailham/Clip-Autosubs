@@ -78,8 +78,19 @@ export default {
       uploadsLoading.value = false;
     }
 
-    function openEditor() {
-      regenerateAutoGroups();
+    function openEditor(result) {
+      if (result && result.groups && result.groups.length > 0) {
+        store.customGroups = result.groups;
+        store.useCustomGroups = true;
+        store.useDynamicMode = true;
+      } else {
+        regenerateAutoGroups();
+      }
+      if (result && result.hidden_indices) {
+        store.hiddenWordIndices = result.hidden_indices;
+      } else {
+        store.hiddenWordIndices = [];
+      }
       store.currentView = 'editor';
     }
 
@@ -94,7 +105,7 @@ export default {
         store.metadata = result.metadata || {};
         store.videoFilename = file.name;
         populateSpeakers(result);
-        openEditor();
+        openEditor(result);
       } catch (err) {
         alert('Error: ' + err.message);
       }
@@ -128,7 +139,7 @@ export default {
         store.metadata = result.metadata || {};
         store.videoFilename = decodeURIComponent(encodedVideo);
         populateSpeakers(result);
-        openEditor();
+        openEditor(result);
       } catch (e) {
         alert('Failed to load transcription: ' + e.message);
       }
@@ -145,7 +156,7 @@ export default {
         store.metadata = result.metadata || {};
         store.videoFilename = filename;
         populateSpeakers(result);
-        openEditor();
+        openEditor(result);
       } catch (err) {
         alert('Error: ' + err.message);
       }

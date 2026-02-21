@@ -1144,6 +1144,7 @@ def _do_refine(job_id: str, req: RefineRequest):
             output_dir=str(OUTPUT_DIR),
             rendered_dir=str(RENDERED_DIR),
             gemini_api_key=req.gemini_api_key,
+            req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             min_silence_ms=req.min_silence_ms,
             padding_ms=req.padding_ms,
@@ -1157,6 +1158,31 @@ def _do_refine(job_id: str, req: RefineRequest):
             "status": "done",
             **result,
         }
+
+        # Save to JSON so it can be reloaded
+        import json
+        req_path = Path(req.video_filename)
+        # If silence was cut, output video is in RENDERED root, and we don't have relative paths.
+        rel_parent = Path() if req.do_cut_silence else req_path.parent
+        stem = Path(result["video_filename"]).stem if req.do_cut_silence else req_path.stem
+        tx_path = OUTPUT_DIR / rel_parent / f"{stem}_transcription.json"
+        tx_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(tx_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"[refine] Failed to save JSON: {e}")
+
+        # If we created a new video via cut_silence, copy it to UPLOAD_DIR
+        # so it appears as a selectable upload for the user.
+        if req.do_cut_silence:
+            src_video = RENDERED_DIR / result["video_filename"]
+            dst_video = UPLOAD_DIR / result["video_filename"]
+            if src_video.exists():
+                import shutil
+                shutil.copy(str(src_video), str(dst_video))
+
+
 
     except Exception as e:
         print(f"[refine] Error: {e}")
