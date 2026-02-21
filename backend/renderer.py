@@ -51,6 +51,31 @@ def get_video_info(video_path: str) -> dict:
 
         width = int(video_stream.get("width", 1920)) if video_stream else 1920
         height = int(video_stream.get("height", 1080)) if video_stream else 1080
+        
+        # Check rotation tags (e.g., from smartphones) to ensure horizontal vs vertical is correct
+        tags = video_stream.get("tags", {}) if video_stream else {}
+        rotate = tags.get("rotate", "0")
+        
+        # Also check side_data for displaymatrix rotation
+        side_data_list = video_stream.get("side_data_list", []) if video_stream else []
+        rotation = 0
+        try:
+            rotation = abs(int(float(rotate)))
+        except ValueError:
+            pass
+            
+        for sd in side_data_list:
+            if sd.get("side_data_type") == "Display Matrix":
+                rot = sd.get("rotation", 0)
+                try:
+                    rotation = abs(int(float(rot)))
+                except ValueError:
+                    pass
+
+        # If rotated 90 or 270 degrees, swap width and height
+        if rotation in (90, 270, -90, -270):
+            width, height = height, width
+
         duration = float(info.get("format", {}).get("duration", 0))
 
         return {"width": width, "height": height, "duration": duration}

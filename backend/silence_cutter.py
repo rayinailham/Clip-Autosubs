@@ -64,9 +64,10 @@ def cut_video_segments(
     cutting without audio looping artifacts.
     """
     def log(msg: str):
-        print(f"[cut_segments] {msg}")
         if progress_cb:
             progress_cb(msg)
+        else:
+            print(f"[cut_segments] {msg}")
 
     video_path_p = Path(video_path).resolve()
     output_path_p = Path(output_path).resolve()
@@ -233,9 +234,10 @@ def cut_silence(
         dict with statistics about the operation.
     """
     def log(msg: str):
-        print(f"[silence_cutter] {msg}")
         if progress_cb:
             progress_cb(msg)
+        else:
+            print(f"[silence_cutter] {msg}")
 
     video_path = Path(video_path).resolve()
     output_path = Path(output_path).resolve()

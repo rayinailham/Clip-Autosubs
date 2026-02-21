@@ -95,19 +95,28 @@ def get_animation_tags(animation: str, is_highlight: bool, scale: int) -> tuple[
         return "", ""
 
 
-def get_text_width(text: str, font_size: int, letter_spacing: int = 0) -> float:
+def get_text_width(text: str, font_size: int, letter_spacing: int = 0, font_name: str = "Impact") -> float:
     # Approximate proportional widths typical for Impact/bold fonts
     widths = {
-        'i': 0.25, 'l': 0.25, 'I': 0.25, 'L': 0.45,
+        'i': 0.25, 'l': 0.25, 'I': 0.3, 'L': 0.45,
         'f': 0.35, 'j': 0.35, 'r': 0.35, 't': 0.35,
-        'm': 0.75, 'w': 0.75, 'M': 0.75, 'W': 0.75,
-        'O': 0.6, 'Q': 0.6, 'C': 0.55, 'G': 0.6,
-        'A': 0.55, 'V': 0.55, 'Y': 0.55,
+        'm': 0.85, 'w': 0.85, 'M': 0.9, 'W': 0.9,
+        'O': 0.65, 'Q': 0.65, 'C': 0.6, 'G': 0.65,
+        'A': 0.6, 'V': 0.6, 'Y': 0.6,
         ' ': 0.3, ',': 0.25, '.': 0.25, '!': 0.3, '-': 0.35,
     }
+    
+    # Modern sans-serif fonts (Montserrat, Poppins, etc.) are significantly wider than condensed fonts.
+    is_wide_font = font_name.lower() not in ["impact", "arial narrow", "bebas neue", "oswald", "anton"]
+    base_default = 0.65 if is_wide_font else 0.5
+    multiplier = 1.25 if is_wide_font else 1.0
+
     w = 0.0
     for char in text:
-        w += widths.get(char, 0.5) * font_size + letter_spacing
+        char_w = widths.get(char)
+        if char_w is None:
+            char_w = widths.get(char.lower(), base_default)
+        w += char_w * font_size * multiplier + letter_spacing
     # Remove one trailing letter_spacing as it applies between chars
     return max(0, w - letter_spacing) if len(text) > 0 else 0
 
@@ -124,6 +133,7 @@ def calculate_word_positions(
     letter_spacing: int = 0,
     pos_x: int = 50,
     pos_y: int = 85,
+    font_name: str = "Impact",
 ) -> dict:
     """
     Calculate the absolute center (x, y) for each word in the group.
@@ -146,7 +156,7 @@ def calculate_word_positions(
     current_width = 0.0
 
     for i, text in enumerate(words_text):
-        w = get_text_width(text, font_size, letter_spacing)
+        w = get_text_width(text, font_size, letter_spacing, font_name)
         needed = w if not current_line else gap_width + w
         if current_line and current_width + needed > available_width:
             lines.append(current_line)
@@ -298,11 +308,7 @@ def generate_ass(
             normal_ass_s = rgb_to_ass_color(normal_color)
 
             def base_color_glow():
-                t = [f"\\c{normal_ass_s}"]
-                if glow_strength > 0:
-                    t.append(f"\\blur{glow_strength // 2}")
-                    t.append(f"\\4c{rgb_to_ass_color(glow_color)}")
-                return t
+                return [f"\\c{normal_ass_s}"]
 
             # ---- typewriter: word-by-word positioned reveal ----
             if sentence_animation == "typewriter":
@@ -320,6 +326,7 @@ def generate_ass(
                     position=position,
                     word_gap=word_gap,
                     letter_spacing=letter_spacing,
+                    font_name=font_name,
                 )
                 total_words = max(len(words_text_list), 1)
                 word_interval = min(speed / total_words / 1000.0, 0.1)
@@ -329,9 +336,6 @@ def generate_ass(
                     if word_appear >= group_end:
                         word_appear = group_start
                     w_tags = [f"\\q2\\an5\\pos({wcx},{wcy})\\c{normal_ass_s}"]
-                    if glow_strength > 0:
-                        w_tags.append(f"\\blur{glow_strength // 2}")
-                        w_tags.append(f"\\4c{rgb_to_ass_color(glow_color)}")
                     w_tags.append("\\fad(40,0)")
                     w_tags_str = "".join(w_tags)
                     events.append(
@@ -445,6 +449,7 @@ def generate_ass(
                         position=position,
                         word_gap=word_gap,
                         letter_spacing=letter_spacing,
+                        font_name=font_name,
                     )
                     total_words = max(len(words_text_list), 1)
                     stagger = speed / total_words / 1000.0
@@ -452,9 +457,6 @@ def generate_ass(
                         wcx, wcy = word_pos.get(widx, (cx_s, cy_s))
                         delay = int(widx * stagger * 1000)
                         w_tags = [f"\\q2\\an5\\pos({wcx},{wcy})\\c{normal_ass_s}"]
-                        if glow_strength > 0:
-                            w_tags.append(f"\\blur{glow_strength // 2}")
-                            w_tags.append(f"\\4c{rgb_to_ass_color(glow_color)}")
                         pop_dur = max(80, speed // 3)
                         zoom_amt = 100 + (30 * anim_intensity // 100) if anim_intensity > 100 else 100
                         start_scale = max(0, 100 - anim_intensity)
@@ -496,6 +498,7 @@ def generate_ass(
             letter_spacing=letter_spacing,
             pos_x=pos_x,
             pos_y=pos_y,
+            font_name=font_name,
         )
 
         # --- Calculate group animation tags ---
@@ -605,13 +608,6 @@ def generate_ass(
                 else:
                     tags = [f"\\q2\\an5\\pos({cx},{cy})\\c{word_color_ass}"]
 
-                # Add glow effect (using blur in ASS)
-                if glow_strength > 0:
-                    glow_color_ass = rgb_to_ass_color(glow_color)
-                    # Use shadow color for glow and blur for the effect
-                    tags.append(f"\\blur{glow_strength // 2}")
-                    tags.append(f"\\4c{glow_color_ass}")
-
                 # Add group animation (fade, pop) if on first highlight window
                 if i == 0:
                     group_anim_tag = get_group_anim_tags(group_animation, cx, cy, j == 0)
@@ -642,6 +638,34 @@ def generate_ass(
                     f"{{{tag_str}}}{text}"
                 )
 
+
+    # If glow_strength > 0, duplicate all Dialogue events onto layer 0 for the glow effect,
+    # ensuring the glow sits neatly underneath the sharp outline (now on layer 1).
+    if glow_strength > 0:
+        actual_events = []
+        glow_c = rgb_to_ass_color(glow_color)
+        
+        # Clamp blur for performance, but border can be thicker
+        glow_blur = glow_strength if glow_strength <= 5 else 5 + (glow_strength - 5) // 2
+        
+        for e in events:
+            if not e.startswith("Dialogue: 0,"):
+                actual_events.append(e)
+                continue
+            
+            # Glow layer (layer 0)
+            glow_e = e
+            # Inject glow overrides at the END of the first tag block so it overrides prior ones
+            idx = glow_e.find("}")
+            if idx != -1:
+                glow_tags = f"\\c{glow_c}\\3c{glow_c}\\bord{glow_strength}\\blur{glow_blur}\\shad0"
+                glow_e = glow_e[:idx] + glow_tags + glow_e[idx:]
+            actual_events.append(glow_e)
+
+            # Main layer (layer 1)
+            main_e = e.replace("Dialogue: 0,", "Dialogue: 1,", 1)
+            actual_events.append(main_e)
+        events = actual_events
 
     return header + "\n".join(events) + "\n"
 

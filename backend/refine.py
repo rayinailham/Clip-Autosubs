@@ -113,8 +113,8 @@ Compare them. If SOURCE B exists, use its spelling and punctuation to correct SO
 Group the REMAINING words into natural subtitle display chunks that are EASY TO READ as captions.
 Rules (STRICT):
 - Exclude ANY word indices you marked in Tasks 2 and 3 (hidden or wasted). Only group the words that are actually kept!
-- MAX 4 words per group (ideal is 2-4 words). DO NOT EXCEED 4 WORDS.
-- ALWAYS break AFTER sentence-ending punctuation (. ! ?)
+- Create natural, phrase-based groups that are easy to read. Do NOT arbitrarily limit length, but keep them easy to digest.
+- MINIMUM 2 words per group, UNLESS a single word is isolated by a significant time gap (>1.0 second) from surrounding words. Pay attention to START and END timestamps!
   → The word AFTER a period starts a NEW group
 - Break at natural pauses (commas, colons, semicolons, dashes)
 - Keep short phrases together ("you know", "I mean", "of course")
@@ -230,7 +230,7 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
 
 # ─── Validation helpers ─────────────────────────────────────
 
-def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set) -> list[dict]:
+def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: set) -> list[dict]:
     """
     Validate Gemini-returned groups. If invalid, return None so caller
     falls back to auto-grouping.
@@ -238,6 +238,7 @@ def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set)
     if not groups:
         return None
 
+    word_count = len(words)
     valid_words = set(i for i in range(word_count) if i not in excluded_indices)
     if not valid_words:
         return None
@@ -276,7 +277,7 @@ def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set)
         for idx in missing:
             placed = False
             for g in validated:
-                if g["word_indices"][-1] == idx - 1 and len(g["word_indices"]) < 4:
+                if g["word_indices"][-1] == idx - 1:
                     g["word_indices"].append(idx)
                     placed = True
                     break
@@ -288,15 +289,70 @@ def _validate_groups(groups: list[dict], word_count: int, excluded_indices: set)
     # Sort groups by first word index
     validated.sort(key=lambda g: g["word_indices"][0])
 
-    # Final pass: Split any overstuffed groups
+    # Final pass: Split any overstuffed groups or groups straddling punctuation or large gaps
     final_groups = []
     for g in validated:
         inds = g["word_indices"]
-        for i in range(0, len(inds), 4):
-            final_groups.append({"word_indices": inds[i:i+4]})
+        current_chunk = []
+        for idx in inds:
+            # Check for large time gap before adding to current_chunk
+            if current_chunk:
+                prev_idx = current_chunk[-1]
+                gap = words[idx]["start"] - words[prev_idx]["end"]
+                if gap >= 1.0:
+                    final_groups.append({"word_indices": current_chunk})
+                    current_chunk = []
+                    
+            current_chunk.append(idx)
+            text = words[idx].get("text", "").strip()
+            # If the chunk ends in punctuation (or is excessively long as a fallback safety limit)
+            has_punct = any(text.endswith(p) for p in [".", "?", "!", ","])
+            if has_punct or len(current_chunk) >= 12:
+                final_groups.append({"word_indices": current_chunk})
+                current_chunk = []
+        if current_chunk:
+            final_groups.append({"word_indices": current_chunk})
 
-    return final_groups
+    # Cleanup pass: eliminate 1-word groups if there isn't a significant time gap
+    merged_groups = []
+    for g in final_groups:
+        inds = g["word_indices"]
+        if not inds:
+            continue
+            
+        if len(inds) == 1:
+            idx = inds[0]
+            curr_word = words[idx]
+            
+            # Check if we can merge backwards
+            if merged_groups:
+                prev_g = merged_groups[-1]
+                prev_idx = prev_g["word_indices"][-1]
+                prev_word = words[prev_idx]
+                gap = curr_word["start"] - prev_word["end"]
+                
+                # If gap is small, merge it backwards
+                if gap < 1.0 and len(prev_g["word_indices"]) < 12:
+                    prev_g["word_indices"].append(idx)
+                    continue
+                    
+            merged_groups.append(g)
+        else:
+            # Current group is >1 word. Check if we should merge the PREVIOUS group forwards into this one
+            if merged_groups and len(merged_groups[-1]["word_indices"]) == 1:
+                prev_idx = merged_groups[-1]["word_indices"][0]
+                prev_word = words[prev_idx]
+                curr_first_idx = inds[0]
+                curr_first_word = words[curr_first_idx]
+                gap = curr_first_word["start"] - prev_word["end"]
+                
+                if gap < 1.0:
+                    merged_groups[-1]["word_indices"].extend(inds)
+                    continue
+            
+            merged_groups.append(g)
 
+    return merged_groups
 
 def _fallback_groups(words: list[dict], excluded_indices: set, wpg: int = 4) -> list[dict]:
     """Smart N-words-per-group fallback that respects punctuation."""
@@ -307,6 +363,13 @@ def _fallback_groups(words: list[dict], excluded_indices: set, wpg: int = 4) -> 
         if i in excluded_indices:
             continue
             
+        if current_group:
+            prev_idx = current_group[-1]
+            gap = words[i]["start"] - words[prev_idx]["end"]
+            if gap >= 1.0:
+                groups.append({"word_indices": current_group})
+                current_group = []
+
         current_group.append(i)
         
         # Check if this word has sentence-ending punctuation or a strong comma
@@ -531,7 +594,7 @@ def refine_video(
     if raw_groups and len(raw_groups) > 0:
         print(f"[DEBUG] first raw_group = {raw_groups[0]}")
 
-    validated_groups = _validate_groups(raw_groups, len(adjusted_words), excluded_indices)
+    validated_groups = _validate_groups(raw_groups, adjusted_words, excluded_indices)
 
     if validated_groups and do_grouping:
         groups = validated_groups
