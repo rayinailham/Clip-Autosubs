@@ -58,3 +58,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.log
+
+# Sensitive credentials
+cookies.txt
