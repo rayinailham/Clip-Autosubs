@@ -44,14 +44,19 @@ export default {
     });
 
     const STEP_ORDER = ['init', 'transcribe', 'silence', 'analyze', 'apply', 'done'];
-    const STEP_LABELS = {
-      init: 'Initializing…',
-      transcribe: 'Transcribing with WhisperX',
-      silence: 'Cutting silences',
-      analyze: 'Analyzing with Gemini AI',
-      apply: 'Applying refinements',
-      done: 'Complete!',
-    };
+    const STEP_LABELS = computed(() => {
+      let modelName = 'WhisperX';
+      if (store.transcriptionModel === 'scribe_v2') modelName = 'ElevenLabs Scribe v2';
+      else if (store.transcriptionModel === 'flyfront/anime-whisper-faster') modelName = 'Anime-Whisper';
+      return {
+        init: 'Initializing…',
+        transcribe: 'Transcribing with ' + modelName,
+        silence: 'Cutting silences',
+        analyze: 'Analyzing with Gemini AI',
+        apply: 'Applying refinements',
+        done: 'Complete!',
+      };
+    });
 
     const stepIndex = computed(() => {
       const idx = STEP_ORDER.indexOf(progress.value.step);
@@ -144,6 +149,7 @@ export default {
           video_filename: filename,
           gemini_api_key: apiKey.value.trim(),
           transcription_model: store.transcriptionModel,
+          elevenlabs_api_key: store.transcriptionModel === 'scribe_v2' ? store.elevenlabsApiKey.trim() : null,
           do_cut_silence: doCutSilence.value,
           do_llm_filter: doLlmFilter.value,
           do_grouping: doGrouping.value
@@ -274,6 +280,15 @@ export default {
       progress.value = { step: '', message: '' };
     }
 
+    const collapsedFolders = ref(new Set());
+    function toggleFolder(folder) {
+      if (collapsedFolders.value.has(folder)) {
+        collapsedFolders.value.delete(folder);
+      } else {
+        collapsedFolders.value.add(folder);
+      }
+    }
+
     onBeforeUnmount(() => {
       if (pollTimer.value) clearInterval(pollTimer.value);
     });
@@ -283,7 +298,7 @@ export default {
       progress, error, progressPct, stepIndex,
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
-      sortMode, processedUploads,
+      sortMode, processedUploads, collapsedFolders, toggleFolder,
       doCutSilence, doLlmFilter, doGrouping,
     };
   },
@@ -327,7 +342,15 @@ export default {
               <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
                 <option value="large-v2">WhisperX (English / Auto-Translate)</option>
                 <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+                <option value="scribe_v2">ElevenLabs Scribe v2 (High Accuracy)</option>
               </select>
+            </label>
+          </div>
+          
+          <div v-if="store.transcriptionModel === 'scribe_v2'" style="background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 0.8rem;">
+            <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
+              <span>🔑 ElevenLabs API Key</span>
+              <input type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
             </label>
           </div>
         </div>
@@ -392,33 +415,37 @@ export default {
             <div v-if="loading" class="uploads-loading">Loading…</div>
             <div v-else-if="uploads.length === 0" class="uploads-empty">No previous uploads found.</div>
             <template v-else v-for="(files, folder) in processedUploads" :key="folder">
-              <div style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border);">
-                📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span>
+              <div class="folder-header" @click="toggleFolder(folder)" 
+                   style="background:var(--surface2); padding:0.5rem 1rem; border-radius:var(--radius-sm); font-weight:bold; color:var(--text); margin-top:1rem; border:1px solid var(--border); cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none;">
+                <span>📁 {{ folder }} <span style="font-weight:normal; color:var(--text-dim); font-size:0.8rem; margin-left:0.5rem;">({{ files.length }} items)</span></span>
+                <span style="font-size:0.7rem; color:var(--text-dim);">{{ collapsedFolders.has(folder) ? '▶ Expand' : '▼ Collapse' }}</span>
               </div>
-              <div v-for="f in files" :key="f.filename" class="upload-item" 
-                   @click="selectedFile = f.filename; uploadFile = null" 
-                   :style="selectedFile === f.filename ? 'border-color: #f7b733; box-shadow: 0 4px 20px rgba(247, 183, 51, 0.4); transform: translateY(-4px);' : ''" 
-                   style="cursor: pointer; position: relative;">
-              <div class="upload-item-thumb">
-                <video
-                  :src="videoURL(f.filename)"
-                  preload="metadata"
-                  muted
-                  playsinline
-                  class="upload-item-video"
-                  @loadedmetadata="e => { e.target.currentTime = 1 }"
-                  @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
-                  @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
-                ></video>
-              </div>
-              <div class="upload-item-body">
-                <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.name || f.filename }}</div>
-                <div class="upload-item-meta">
-                  {{ f.size_mb }}{{ f.size_mb === 'Rendered' ? '' : ' MB' }}
-                  <span v-if="selectedFile === f.filename" style="margin-left: auto; color: #f7b733; font-weight: bold; background: rgba(247,183,51,0.1); padding: 2px 6px; border-radius: 4px;">Selected</span>
+              <div v-if="!collapsedFolders.has(folder)" class="folder-content">
+                <div v-for="f in files" :key="f.filename" class="upload-item" 
+                     @click="selectedFile = f.filename; uploadFile = null" 
+                     :style="selectedFile === f.filename ? 'border-color: #f7b733; box-shadow: 0 4px 20px rgba(247, 183, 51, 0.4); transform: translateY(-4px);' : ''" 
+                     style="cursor: pointer; position: relative;">
+                  <div class="upload-item-thumb">
+                    <video
+                      :src="videoURL(f.filename)"
+                      preload="metadata"
+                      muted
+                      playsinline
+                      class="upload-item-video"
+                      @loadedmetadata="e => { e.target.currentTime = 1 }"
+                      @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
+                      @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
+                    ></video>
+                  </div>
+                  <div class="upload-item-body">
+                    <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.name || f.filename }}</div>
+                    <div class="upload-item-meta">
+                      {{ f.size_mb }}{{ f.size_mb === 'Rendered' ? '' : ' MB' }}
+                      <span v-if="selectedFile === f.filename" style="margin-left: auto; color: #f7b733; font-weight: bold; background: rgba(247,183,51,0.1); padding: 2px 6px; border-radius: 4px;">Selected</span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
             </template>
           </div>
         </div>

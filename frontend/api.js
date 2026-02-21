@@ -24,6 +24,7 @@ export async function uploadAndTranscribe(file, diarizeOpts = {}) {
   if (diarizeOpts.transcription_model) formData.append('transcription_model', diarizeOpts.transcription_model);
   // Optional diarization fields
   if (diarizeOpts.hf_token) formData.append('hf_token', diarizeOpts.hf_token);
+  if (diarizeOpts.elevenlabs_api_key) formData.append('elevenlabs_api_key', diarizeOpts.elevenlabs_api_key);
   if (diarizeOpts.min_speakers != null) formData.append('min_speakers', String(diarizeOpts.min_speakers));
   if (diarizeOpts.max_speakers != null) formData.append('max_speakers', String(diarizeOpts.max_speakers));
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
@@ -38,6 +39,7 @@ export async function transcribeExistingFile(filename, diarizeOpts = {}) {
   const body = { filename };
   if (diarizeOpts.transcription_model) body.transcription_model = diarizeOpts.transcription_model;
   if (diarizeOpts.hf_token) body.hf_token = diarizeOpts.hf_token;
+  if (diarizeOpts.elevenlabs_api_key) body.elevenlabs_api_key = diarizeOpts.elevenlabs_api_key;
   if (diarizeOpts.min_speakers != null) body.min_speakers = diarizeOpts.min_speakers;
   if (diarizeOpts.max_speakers != null) body.max_speakers = diarizeOpts.max_speakers;
   const res = await fetch('/transcribe-existing', {

@@ -10,9 +10,13 @@ import gc
 import json
 import logging
 import os
+import subprocess
 import time
 import warnings
+import tempfile
 from pathlib import Path
+
+import requests
 
 # Suppress noisy third-party warnings before importing them
 warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed.*")
@@ -58,7 +62,8 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
                      hf_token: str | None = None,
                      min_speakers: int | None = None,
                      max_speakers: int | None = None,
-                     model_id: str = "large-v2") -> dict:
+                     model_id: str = "large-v2",
+                     elevenlabs_api_key: str | None = None) -> dict:
     """
     Full transcription pipeline:
       1. Load audio from video
@@ -86,6 +91,11 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
         output_dir = video_path.parent
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if model_id == "scribe_v2":
+        if not elevenlabs_api_key:
+            raise ValueError("ElevenLabs API key is required when using scribe_v2 model.")
+        return _transcribe_elevenlabs(video_path, output_dir, elevenlabs_api_key)
 
     print(f"[transcribe] Device: {DEVICE} | Compute: {COMPUTE_TYPE} | Batch: {BATCH_SIZE}")
     print(f"[transcribe] VRAM before start: {get_vram_usage()}")
@@ -233,6 +243,97 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     print(f"[transcribe] Done! {len(words)} words in {elapsed}s")
+    if speakers_detected:
+        print(f"[transcribe]   -> {speakers_detected} speaker(s) detected")
+    print(f"[transcribe] JSON saved to: {json_path}")
+
+    return output
+
+
+def _transcribe_elevenlabs(video_path: Path, output_dir: Path, api_key: str) -> dict:
+    """Handle transcription via ElevenLabs API (Scribe v2)."""
+    print(f"[transcribe] Starting ElevenLabs Scribe v2 transcription for {video_path.name}...")
+    t_start = time.time()
+    
+    # 1. Extract audio to save upload bandwidth
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        audio_path = tmp.name
+        
+    try:
+        print("[transcribe] Extracting audio for upload...")
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(video_path), 
+            "-vn", "-c:a", "libmp3lame", "-b:a", "128k", 
+            audio_path
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        # 2. Upload to ElevenLabs
+        url = "https://api.elevenlabs.io/v1/speech-to-text"
+        headers = {"xi-api-key": api_key}
+        data = {
+            "model_id": "scribe_v2",
+            "tag_audio_events": "false",
+            "diarize": "true"
+        }
+        
+        print("[transcribe] Uploading to ElevenLabs API...")
+        with open(audio_path, 'rb') as f:
+            files = {"file": (Path(audio_path).name, f, "audio/mpeg")}
+            res = requests.post(url, headers=headers, data=data, files=files)
+            
+        if res.status_code != 200:
+            raise RuntimeError(f"ElevenLabs API error {res.status_code}: {res.text}")
+            
+        res_json = res.json()
+        
+    finally:
+        if os.path.exists(audio_path):
+            os.remove(audio_path)
+            
+    # 3. Process output
+    extracted_words = []
+    for word_obj in res_json.get("words", []):
+        w_text = word_obj.get("text", "").strip()
+        if not w_text:
+            continue
+            
+        word_entry = {
+            "text": w_text,
+            "start": round(word_obj.get("start", 0), 3),
+            "end": round(word_obj.get("end", 0), 3),
+            "speaker": word_obj.get("speaker_id", "SPEAKER_00")
+        }
+        extracted_words.append(word_entry)
+        
+    elapsed = round(time.time() - t_start, 1)
+    speakers_detected = len({w["speaker"] for w in extracted_words})
+    
+    # Calculate duration
+    duration = 0
+    if extracted_words:
+        duration = extracted_words[-1]["end"]
+    
+    output = {
+        "metadata": {
+            "source_file": video_path.name,
+            "source_language": res_json.get("language_code", "en"),
+            "language": "en", # Ensure standard language key
+            "model": "scribe_v2",
+            "duration_seconds": duration,
+            "processing_time_seconds": elapsed,
+            "word_count": len(extracted_words),
+            "speakers_detected": speakers_detected
+        },
+        "words": extracted_words,
+    }
+
+    # 4. Save JSON
+    json_filename = video_path.stem + "_transcription.json"
+    json_path = output_dir / json_filename
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+    print(f"[transcribe] Done! {len(extracted_words)} words in {elapsed}s")
     if speakers_detected:
         print(f"[transcribe]   -> {speakers_detected} speaker(s) detected")
     print(f"[transcribe] JSON saved to: {json_path}")

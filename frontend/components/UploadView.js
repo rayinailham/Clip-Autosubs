@@ -38,8 +38,11 @@ export default {
 
     function getDiarizeOpts() {
       const opts = { transcription_model: store.transcriptionModel };
+      if (store.transcriptionModel === 'scribe_v2' && store.elevenlabsApiKey) {
+        opts.elevenlabs_api_key = store.elevenlabsApiKey.trim();
+      }
       const token = (store.diarization.hfToken || '').trim();
-      if (token) opts.hf_token = token;
+      if (token && store.transcriptionModel !== 'scribe_v2') opts.hf_token = token;
       const maxSp = store.diarization.maxSpeakers;
       if (maxSp && maxSp > 0) opts.max_speakers = maxSp;
       return opts;
@@ -233,16 +236,24 @@ export default {
             <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
               <option value="large-v2">WhisperX (English / Auto-Translate)</option>
               <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+              <option value="scribe_v2">ElevenLabs Scribe v2 (High Accuracy)</option>
             </select>
           </label>
         </div>
-        <button class="btn btn-ghost btn-sm" @click="showDiarize = !showDiarize"
+
+        <div v-if="store.transcriptionModel === 'scribe_v2'" style="margin-bottom: 0.8rem; background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+          <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
+            <span>🔑 ElevenLabs API Key</span>
+            <input type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
+          </label>
+        </div>
+        <button v-if="store.transcriptionModel !== 'scribe_v2'" class="btn btn-ghost btn-sm" @click="showDiarize = !showDiarize"
                 style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim);">
           <span style="font-size: 0.6rem;">{{ showDiarize ? '▼' : '▶' }}</span>
           🎤 Speaker Diarization
           <span v-if="store.diarization.hfToken" style="color: var(--success); font-size: 0.65rem;">● Active</span>
         </button>
-        <div v-if="showDiarize" class="diarize-panel"
+        <div v-if="showDiarize && store.transcriptionModel !== 'scribe_v2'" class="diarize-panel"
              style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
                     padding: 0.75rem 1rem; margin-top: 0.35rem;">
           <p style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.5rem; line-height: 1.45;">

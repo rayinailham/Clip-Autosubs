@@ -175,6 +175,7 @@ export default {
         posWrapper.style.textAlign = 'center';
         posWrapper.style.whiteSpace = 'normal';
         posWrapper.style.wordBreak = 'break-word';
+        posWrapper.style.width = 'max-content';
         posWrapper.style.maxWidth = '90%';
         preview.appendChild(posWrapper);
       }

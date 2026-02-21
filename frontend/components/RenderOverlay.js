@@ -61,7 +61,14 @@ export default {
           if (data.status === 'generating_subtitles') {
             r.status = 'Generating subtitle file…';
           } else if (data.status === 'rendering') {
-            r.status = 'Burning subtitles into video…';
+            if (data.progress_pct !== undefined) {
+              r.status = 'Burning subtitles into video… ' + data.progress_pct.toFixed(1) + '%';
+              r.indeterminate = false;
+              r.progress = data.progress_pct;
+            } else {
+              r.status = 'Burning subtitles into video…';
+              r.indeterminate = true;
+            }
           } else if (data.status === 'done') {
             clearInterval(pollInterval);
             r.title = 'Render Complete!';
