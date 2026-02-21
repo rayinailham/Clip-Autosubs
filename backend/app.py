@@ -945,14 +945,14 @@ def _do_trim(job_id: str, req: TrimRequest):
         import subprocess, time as _time
         t0 = _time.time()
 
-        cmd = [
+        cmd_gpu = [
             "ffmpeg", "-y",
             "-ss", str(req.trim_start),
             "-i", str(video_path),
             "-t", str(duration),
-            "-c:v", "libx264",
-            "-crf", "18",
-            "-preset", "fast",
+            "-c:v", "h264_nvenc",
+            "-cq", "18",
+            "-preset", "p4",
             "-c:a", "aac",
             "-b:a", "192k",
             "-avoid_negative_ts", "make_zero",
@@ -961,11 +961,31 @@ def _do_trim(job_id: str, req: TrimRequest):
         ]
 
         log(f"Running FFmpeg…")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd_gpu, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
 
         if result.returncode != 0:
-            tail = result.stderr[-1200:] if result.stderr else "No stderr"
-            raise RuntimeError(f"FFmpeg failed (code {result.returncode}):\n{tail}")
+            if "h264_nvenc" in result.stderr or "Unknown encoder" in result.stderr:
+                cmd_cpu = [
+                    "ffmpeg", "-y",
+                    "-ss", str(req.trim_start),
+                    "-i", str(video_path),
+                    "-t", str(duration),
+                    "-c:v", "libx264",
+                    "-crf", "18",
+                    "-preset", "fast",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                    "-avoid_negative_ts", "make_zero",
+                    "-movflags", "+faststart",
+                    str(output_path),
+                ]
+                result = subprocess.run(cmd_cpu, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+                if result.returncode != 0:
+                    tail = result.stderr[-1200:] if result.stderr else "No stderr"
+                    raise RuntimeError(f"FFmpeg failed (CPU fallback) (code {result.returncode}):\n{tail}")
+            else:
+                tail = result.stderr[-1200:] if result.stderr else "No stderr"
+                raise RuntimeError(f"FFmpeg failed (GPU) (code {result.returncode}):\n{tail}")
 
         if not output_path.exists():
             raise RuntimeError("FFmpeg exited 0 but output file was not created.")
@@ -1056,20 +1076,13 @@ def _do_yt_cut(job_id: str, url: str, clips: list[dict]):
         total = len(clips)
 
         def progress(stage: str, pct: int):
-            if stage == "downloading":
-                yt_cut_jobs[job_id] = {
-                    "status": "downloading",
-                    "message": f"Downloading video… {pct}%",
-                    "progress": int(pct * 0.7),  # download = 0–70%
-                    "clips": [],
-                }
-            elif stage == "cutting":
-                yt_cut_jobs[job_id] = {
-                    "status": "cutting",
-                    "message": f"Cutting clips… {pct}%",
-                    "progress": 70 + int(pct * 0.3),  # cutting = 70–100%
-                    "clips": yt_cut_jobs[job_id].get("clips", []),
-                }
+            status = "downloading" if "download" in stage.lower() else "cutting"
+            yt_cut_jobs[job_id] = {
+                "status": status,
+                "message": f"{stage.capitalize()}… {pct}%",
+                "progress": pct,
+                "clips": yt_cut_jobs[job_id].get("clips", []),
+            }
 
         yt_cut_jobs[job_id] = {"status": "downloading", "message": "Starting download…", "progress": 0, "clips": []}
         results = download_and_cut_clips(url, clips, UPLOAD_DIR, progress_cb=progress)

@@ -112,21 +112,21 @@ def _extract_video_id(url: str) -> str:
 
 
 def _get_cookie_opts_list() -> list[dict]:
-    """Return a list of cookie configurations to try, in order of preference."""
-    opts = []
-    # 1. Local cookies.txt (most reliable, avoids browser lock/DPAPI completely)
-    if Path("cookies.txt").exists():
-        opts.append({"cookiefile": "cookies.txt"})
-    # 2. Try browsers (excluding chrome initially if possible, or placing it last due to App-Bound Encryption DPAPI issues)
-    opts.extend([
-        {"cookiesfrombrowser": ("edge",)},
-        {"cookiesfrombrowser": ("firefox",)},
-        {"cookiesfrombrowser": ("brave",)},
-        {"cookiesfrombrowser": ("opera",)},
-        {"cookiesfrombrowser": ("chrome",)},
-        {}  # Fallback: try without cookies
-    ])
-    return opts
+    """Return a list of cookie configurations to try."""
+    cookie_path = str(Path(__file__).resolve().parent.parent / "cookies.txt")
+    return [
+        {"cookiefile": cookie_path},
+        {"cookiesfrombrowser": ("edge",)}, # fallback
+        {"cookiesfrombrowser": ("chrome",)}, # fallback
+        {} # fallback to no cookies
+    ]
+
+# Silent logger to prevent yt-dlp from polluting console with DPAPI errors when iterating
+class _SilentLogger:
+    def debug(self, msg): pass
+    def warning(self, msg): pass
+    def error(self, msg): pass
+
 
 
 def _extract_via_transcript_api(url: str) -> dict:
@@ -196,8 +196,7 @@ def _extract_via_transcript_api(url: str) -> dict:
                     "skip_download": True,
                     "quiet": True,
                     "no_warnings": True,
-                    "source_address": "0.0.0.0",
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "logger": _SilentLogger(),
                 }
                 meta_opts.update(cookie_opt)
                 
@@ -249,19 +248,30 @@ def extract_transcript(url: str) -> dict:
                 
                 for c_idx, cookie_opt in enumerate(cookie_opts):
                     try:
+                        # 1. Fetch metadata without subtitles to get original video language
+                        meta_opts = {
+                            "skip_download": True,
+                            "quiet": True,
+                            "no_warnings": True,
+                            "logger": _SilentLogger(),
+                        }
+                        meta_opts.update(cookie_opt)
+                        with yt_dlp.YoutubeDL(meta_opts) as ydl:
+                            info = ydl.extract_info(url, download=False)
+                            video_lang = info.get("language") or "en"
+                            
+                        # 2. Download ONLY the original language transcript
                         ydl_opts = {
                             "skip_download": True,
-                            "writesubtitles": False,
+                            "writesubtitles": True,
                             "writeautomaticsub": True,
-                            "subtitleslangs": [".*"],
+                            "subtitleslangs": [f"{video_lang}.*"],
                             "subtitlesformat": "json3/vtt/best",
                             "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
                             "quiet": True,
                             "no_warnings": True,
-                            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                            "referer": "https://www.youtube.com/",
-                            "sleep_interval_subtitles": 7,
-                            "source_address": "0.0.0.0",
+                            "logger": _SilentLogger(),
+                            "sleep_interval_subtitles": 2,
                         }
                         ydl_opts.update(cookie_opt)
 
@@ -269,8 +279,9 @@ def extract_transcript(url: str) -> dict:
                             info = ydl.extract_info(url, download=True)
                             break  # Success
                     except Exception as loop_e:
-                        if c_idx == len(cookie_opts) - 1:
-                            raise loop_e  # Last resort failed, let the outer retry block catch it
+                        is_rate_limit = "429" in str(loop_e) or "Too Many Requests" in str(loop_e)
+                        if is_rate_limit or c_idx == len(cookie_opts) - 1:
+                            raise loop_e  # Hit 429 or last resort failed, let outer block catch it
                 
 
                 # Identify the best subtitle file from the temp dir
@@ -343,7 +354,8 @@ def extract_transcript(url: str) -> dict:
     # ── Fallback: try youtube_transcript_api ──────────────────────────────────
     if YT_TRANSCRIPT_API_AVAILABLE:
         try:
-            print("[yt-clipper] yt-dlp subtitle download failed, trying youtube_transcript_api fallback…")
+            print(f"[yt-clipper] yt-dlp subtitle download failed: {last_error}")
+            print("[yt-clipper] trying youtube_transcript_api fallback…")
             return _extract_via_transcript_api(url)
         except Exception as fallback_err:
             raise RuntimeError(
@@ -519,11 +531,37 @@ def download_video(
 
     class _ProgressHook:
         def __call__(self, d):
-            if progress_cb and d.get("status") == "downloading":
+            if d.get("status") == "downloading":
+                pct = 0
                 total = d.get("total_bytes") or d.get("total_bytes_estimate", 0)
                 downloaded = d.get("downloaded_bytes", 0)
-                if total:
-                    progress_cb(int(downloaded / total * 100))
+                
+                if total > 0:
+                    pct = (downloaded / total) * 100
+                elif d.get("fragment_count", 0) > 0:
+                    pct = (d.get("fragment_index", 0) / d.get("fragment_count")) * 100
+                
+                if pct > 0:
+                    speed = d.get('speed')
+                    speed_str = ""
+                    if speed:
+                        speed_mb = speed / (1024 * 1024)
+                        speed_str = f" @ {speed_mb:.1f} MB/s"
+                    
+                    if progress_cb:
+                        import inspect
+                        if 'speed_str' in inspect.signature(progress_cb).parameters:
+                            progress_cb(pct, speed_str=speed_str)
+                        else:
+                            progress_cb(int(pct))
+                            
+                    import sys
+                    sys.stdout.write(f"\r[yt-dlp] Downloading... {pct:.1f}%{speed_str}      ")
+                    sys.stdout.flush()
+            elif d.get("status") == "finished":
+                import sys
+                sys.stdout.write("\r[yt-dlp] Download finished!                           \n")
+                sys.stdout.flush()
 
     cookie_opts = _get_cookie_opts_list()
     for c_idx, cookie_opt in enumerate(cookie_opts):
@@ -534,6 +572,7 @@ def download_video(
                 "outtmpl": outtmpl,
                 "quiet": True,
                 "no_warnings": True,
+                "logger": _SilentLogger(),
                 "progress_hooks": [_ProgressHook()],
                 "concurrent_fragment_downloads": 5,
                 "continuedl": True,
@@ -554,11 +593,11 @@ def download_video(
             is_bot_error = "confirm you’re not a bot" in err_msg or "429" in err_msg or "Sign in" in err_msg
             
             # Print warning but don't abort unless it's the last try
-            if c_idx < len(cookie_opts) - 1:
+            if c_idx < len(cookie_opts) - 1 and not (("429" in err_msg) and ("Too Many" in err_msg)):
                 if "Could not copy" in err_msg and "cookie" in err_msg:
-                    print(f"[yt-clipper] Cookie database ({cookie_opt}) locked or inaccessible. Trying next…")
+                    print(f"[yt-clipper] Cookie database locked or inaccessible. Trying next…")
                 elif is_bot_error:
-                    print(f"[yt-clipper] Bot detection triggered with {cookie_opt}. Trying next option…")
+                    print(f"[yt-clipper] Bot detection triggered. Trying next option…")
                 continue
 
             if is_bot_error:
@@ -584,27 +623,51 @@ def cut_clip(
 ) -> Path:
     """
     Cut a clip from source_video [start, end] (seconds) and save to output_path.
-    Uses FFmpeg stream copy for speed (no re-encode).
+    Uses FFmpeg with h264_nvenc for speed, falling back to libx264.
     """
     duration = end - start
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
+    
+    # Try GPU NVENC first
+    cmd_gpu = [
         "ffmpeg", "-y",
         "-ss", _seconds_to_ffmpeg_ts(start),
         "-i", str(source_video),
         "-t", _seconds_to_ffmpeg_ts(duration),
-        "-c:v", "libx264",
-        "-crf", "18",
-        "-preset", "fast",
+        "-c:v", "h264_nvenc",
+        "-cq", "18",
+        "-preset", "p4",
         "-c:a", "aac",
         "-b:a", "192k",
         "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
         str(output_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd_gpu, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    
     if result.returncode != 0:
-        raise RuntimeError(f"FFmpeg error cutting clip:\n{result.stderr[-1000:]}")
+        if "h264_nvenc" in result.stderr or "Unknown encoder" in result.stderr:
+            # Fallback to software encoding
+            cmd_cpu = [
+                "ffmpeg", "-y",
+                "-ss", _seconds_to_ffmpeg_ts(start),
+                "-i", str(source_video),
+                "-t", _seconds_to_ffmpeg_ts(duration),
+                "-c:v", "libx264",
+                "-crf", "18",
+                "-preset", "fast",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-avoid_negative_ts", "make_zero",
+                "-movflags", "+faststart",
+                str(output_path),
+            ]
+            result = subprocess.run(cmd_cpu, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if result.returncode != 0:
+                raise RuntimeError(f"FFmpeg error cutting clip (CPU fallback):\n{result.stderr[-1000:]}")
+        else:
+            raise RuntimeError(f"FFmpeg error cutting clip:\n{result.stderr[-1000:]}")
+            
     return output_path
 
 
@@ -653,28 +716,44 @@ def download_and_cut_clips(
     folder_path.mkdir(parents=True, exist_ok=True)
 
     if progress_cb:
-        progress_cb("cutting", 0)
+        progress_cb("downloading full video", 0)
 
-    # Stage 2: Cut clips directly via download
+    # Stage 2: Download full video once
+    print(f"[yt-clipper] Downloading full video for local clipping...")
+    
+    def _full_dl_progress(pct, speed_str=""):
+        if progress_cb:
+            progress_cb(f"downloading full video{speed_str}", int(pct))
+
+    full_video_stem = f"{video_id}_full_source"
+    full_video_path = download_video(
+        url,
+        folder_path,
+        progress_cb=_full_dl_progress,
+        clip_range=None,
+        filename_stem=full_video_stem
+    )
+
+    # Stage 3: Cut clips locally
     results = []
     total_clips = len(clips)
     for i, clip in enumerate(clips):
         safe_title = re.sub(r'[<>:"/\\|?*]', "", clip["title"])[:50].strip()
         safe_title = re.sub(r"\s+", "_", safe_title)
         filename_stem = f"yt_{clip['id']:02d}_{safe_title}"
+        
+        target_filename = f"{filename_stem}{full_video_path.suffix}"
+        out_path = folder_path / target_filename
 
-        def _dl_progress(pct):
-            if progress_cb:
-                overall_pct = int(((i + (pct / 100)) / total_clips) * 100)
-                progress_cb("downloading & cutting", overall_pct)
-
-        print(f"[yt-clipper] Downloading clip section: {clip['start']}s - {clip['end']}s into {filename_stem}")
-        out_path = download_video(
-            url,
-            folder_path,
-            progress_cb=_dl_progress,
-            clip_range=(clip["start"], clip["end"]),
-            filename_stem=filename_stem
+        print(f"[yt-clipper] Cutting clip: {clip['start']}s - {clip['end']}s into {filename_stem}")
+        if progress_cb:
+            progress_cb(f"cutting clip {i+1}/{total_clips}", 50 + int((i / total_clips) * 50))
+            
+        cut_clip(
+            source_video=full_video_path,
+            start=clip["start"],
+            end=clip["end"],
+            output_path=out_path
         )
 
         filename = out_path.name
@@ -709,6 +788,14 @@ def download_and_cut_clips(
         })
 
         if progress_cb:
-            progress_cb("cutting", int((i + 1) / total_clips * 100))
+            progress_cb(f"cutting clip {i+1}/{total_clips}", 50 + int(((i + 1) / total_clips) * 50))
+
+    # Clean up the full source video to save disk space
+    try:
+        if full_video_path.exists():
+            full_video_path.unlink()
+            print(f"[yt-clipper] Deleted full source video: {full_video_path.name}")
+    except Exception as e:
+        print(f"[yt-clipper] Warning: Could not delete full source video: {e}")
 
     return results

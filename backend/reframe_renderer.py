@@ -176,7 +176,7 @@ def render_vtuber_short(
     if progress_cb:
         progress_cb("Running FFmpeg…")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
 
     if result.returncode != 0:
         err = result.stderr[-1000:] if result.stderr else "Unknown error"
@@ -203,7 +203,7 @@ def _run_ffmpeg(cmd: list[str], output_path, progress_cb=None):
     print(f"[reframe] Command:\n  {' '.join(cmd)}")
     if progress_cb:
         progress_cb("Running FFmpeg…")
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
     if result.returncode != 0:
         err = result.stderr[-1500:] if result.stderr else "Unknown error"
         raise RuntimeError(f"FFmpeg failed:\n{err}")
