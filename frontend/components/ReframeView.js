@@ -1,6 +1,6 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import store from '../store.js';
-import { uploadVideoOnly, startReframeJob, pollReframeStatus, fetchUploads, videoURL } from '../api.js';
+import { uploadVideoOnly, startReframeJob, pollReframeStatus, fetchUploads, videoURL, deleteUpload } from '../api.js';
 
 export default {
   name: 'ReframeView',
@@ -251,9 +251,20 @@ export default {
       }
     }
 
+    async function deleteFile(filename) {
+      if (!confirm(`Delete "${filename}"?`)) return;
+      try {
+        await deleteUpload(filename);
+        await loadPreviousUploads();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    }
+
     return {
       store, uploading, dragover, MODE_LABELS,
       uploads, uploadsLoading, loadPreviousUploads, useExistingUpload, videoURL,
+      deleteFile,
       onFileChange, onDrop, onDragover, onDragleave,
       videoTop, videoBot, playing, syncBot, togglePlay,
       sectionStyle, startRender, closeRender, goHome, goToRefine, setMode, goBack,
@@ -355,7 +366,9 @@ export default {
               </div>
               
               <div v-if="!collapsedFolders.has(folder)" class="folder-content">
-                <div v-for="f in files" :key="f.filename" class="upload-item">
+                <div v-for="f in files" :key="f.filename" class="upload-item"
+                     style="cursor: pointer; position: relative;"
+                     @click="useExistingUpload(f.filename)">
                   <div class="upload-item-thumb">
                     <video
                       :src="videoURL(f.filename)"
@@ -367,13 +380,14 @@ export default {
                       @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
                       @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
                     ></video>
+                    <button class="btn-delete-overlay" :title="'Delete ' + f.filename"
+                            @click.stop="deleteFile(f.filename)">
+                      🗑
+                    </button>
                   </div>
                   <div class="upload-item-body">
                     <div class="upload-item-name" :title="f.name || f.filename">{{ f.name || f.filename }}</div>
                     <div class="upload-item-meta">{{ f.size_mb }} MB</div>
-                    <div class="upload-item-action">
-                      <button class="btn btn-primary btn-sm" @click="useExistingUpload(f.filename)">Use ▶</button>
-                    </div>
                   </div>
                 </div>
               </div>
