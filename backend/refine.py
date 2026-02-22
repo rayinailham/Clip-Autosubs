@@ -107,7 +107,7 @@ You may be provided with TWO transcripts:
 - SOURCE A (WhisperX): Word-level timing, but might have misspellings or poor punctuation.
 - SOURCE B (YouTube CC): Better spelling for names/brands and more natural sentence grouping.
 
-Compare them. If SOURCE B exists, use its spelling and punctuation to correct SOURCE A. Your FINAL 'words' in the output JSON should use the timing from SOURCE A but the optimized text from your hybrid analysis.
+Compare them. If SOURCE B exists, use its spelling and punctuation to correct SOURCE A. ONLY return words in 'optimized_words' that actually needed correcting (i.e. changing the text from SOURCE A). Do NOT return words that are unchanged.
 
 ═══ TASK 5 — SMART SUBTITLE GROUPING (IMPORTANT) ═══
 Group the REMAINING words into natural subtitle display chunks that are EASY TO READ as captions.
@@ -138,7 +138,7 @@ Rules (STRICT):
   ]
 }
 Note: 'optimized_words' should only be returned if you found corrections to make.
-If you return 'optimized_words', ensure the count and order exactly match the input.
+If you return 'optimized_words', ONLY include the specific words you corrected by their exact index. Do NOT return the entire unchanged transcript.
 """
 
 
@@ -557,8 +557,8 @@ def refine_video(
 
     # 4a-bis — Optimized words (Hybrid mode using reference)
     optimized = analysis.get("optimized_words", [])
-    if optimized and len(optimized) == len(adjusted_words):
-        log("apply", "Applying Optimized Text from source B (Hybrid Mode)")
+    if optimized:
+        log("apply", f"Applying Optimized Text from source B (Hybrid Mode) for {len(optimized)} words")
         for item in optimized:
             idx = item.get("index")
             text = item.get("text")

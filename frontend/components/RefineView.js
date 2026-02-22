@@ -1,6 +1,6 @@
 import { ref, computed, onBeforeUnmount } from 'vue';
 import store, { regenerateAutoGroups } from '../store.js';
-import { fetchUploads, uploadAndTranscribe, startRefineJob, pollRefineStatus, videoURL } from '../api.js';
+import { fetchUploads, uploadAndTranscribe, startRefineJob, pollRefineStatus, videoURL, deleteUpload } from '../api.js';
 
 export default {
   name: 'RefineView',
@@ -280,6 +280,16 @@ export default {
       progress.value = { step: '', message: '' };
     }
 
+    async function deleteFile(filename) {
+      if (!confirm(`Delete "${filename}"?\nThis will also remove its transcription if one exists.`)) return;
+      try {
+        await deleteUpload(filename);
+        await loadUploads();
+      } catch (err) {
+        alert('Delete failed: ' + err.message);
+      }
+    }
+
     const collapsedFolders = ref(new Set());
     function toggleFolder(folder) {
       if (collapsedFolders.value.has(folder)) {
@@ -299,7 +309,7 @@ export default {
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads, collapsedFolders, toggleFolder,
-      doCutSilence, doLlmFilter, doGrouping,
+      doCutSilence, doLlmFilter, doGrouping, deleteFile,
     };
   },
   template: `
@@ -436,6 +446,10 @@ export default {
                       @mouseenter="e => { e.target.currentTime = 0; e.target.play(); }"
                       @mouseleave="e => { e.target.pause(); e.target.currentTime = 1; }"
                     ></video>
+                    <button class="btn-delete-overlay" :title="'Delete ' + f.filename"
+                            @click.stop="deleteFile(f.filename)">
+                      🗑
+                    </button>
                   </div>
                   <div class="upload-item-body">
                     <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.name || f.filename }}</div>

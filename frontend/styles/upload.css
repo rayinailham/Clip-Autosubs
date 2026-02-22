@@ -282,6 +282,7 @@
   color: var(--text);
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.35;
@@ -337,4 +338,35 @@
 .btn-delete:hover {
   opacity: 1;
   color: #ff4d4d;
+}
+
+.btn-delete-overlay {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.2s;
+  z-index: 10;
+}
+
+.upload-item:hover .btn-delete-overlay {
+  opacity: 0.6;
+}
+
+.btn-delete-overlay:hover {
+  opacity: 1 !important;
+  background: #ff4d4d;
+  transform: scale(1.1);
 }
