@@ -157,7 +157,7 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
 
     # ── Step 4: Speaker diarization (optional) ──────────────
     speakers_detected = 0
-    if hf_token:
+    if False and hf_token:
         try:
             from whisperx.diarize import DiarizationPipeline
 
@@ -273,7 +273,7 @@ def _transcribe_elevenlabs(video_path: Path, output_dir: Path, api_key: str) -> 
         data = {
             "model_id": "scribe_v2",
             "tag_audio_events": "false",
-            "diarize": "true"
+            "diarize": "false"
         }
         
         print("[transcribe] Uploading to ElevenLabs API...")

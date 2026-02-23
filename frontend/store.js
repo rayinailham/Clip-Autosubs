@@ -32,7 +32,7 @@ const store = reactive({
   // ── Undo / Redo ─────────────────────────
   undoStack: [],
   redoStack: [],
-  MAX_UNDO: 50,
+  MAX_UNDO: 1000,
 
   // ── Playhead (shared) ───────────────────
   currentTime: 0,
@@ -172,7 +172,6 @@ const store = reactive({
   // ── Speaker data ──────────────────────────
   speakers: {},          // e.g. { SPEAKER_1: 'Host', SPEAKER_2: 'Guest' }
   hiddenWordIndices: [], // word indices to hide (overlapping speech)
-  hook: null,            // { word_index_start, word_index_end, reason }
 });
 
 export default store;

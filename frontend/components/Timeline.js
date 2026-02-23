@@ -395,22 +395,6 @@ export default {
       return getSpeakerColor(speaker).label;
     }
 
-    // Hook marker
-    const hookMarker = computed(() => {
-      if (!store.hook || !store.words.length) return null;
-      const startIdx = store.hook.word_index_start;
-      const endIdx = store.hook.word_index_end;
-      if (startIdx == null || endIdx == null) return null;
-      const startWord = store.words[startIdx];
-      const endWord = store.words[Math.min(endIdx, store.words.length - 1)];
-      if (!startWord || !endWord) return null;
-      return {
-        start: startWord.start,
-        end: endWord.end,
-        reason: store.hook.reason || 'Best hook moment',
-      };
-    });
-
     // ── Split / Segment helpers ────────────────────────────────────
     const segments = computed(() => getSegments(duration.value));
     const hasSplitPoints = computed(() => store.splitPoints.length > 0);
@@ -425,17 +409,6 @@ export default {
       return 'Redo: ' + store.redoStack[store.redoStack.length - 1].label;
     });
 
-    function handleCut() {
-      addSplitAtPlayhead();
-    }
-
-    function handleToggleSegment(index) {
-      toggleSegment(index);
-    }
-
-    function handleRemoveSplit(index) {
-      removeSplitPoint(index);
-    }
 
     // ── Trim markers from store ────────────────────────────
     const trimIn  = computed(() => store.trimmer.inPoint);
@@ -447,6 +420,18 @@ export default {
       const right = 100 - pct(trimOut.value);
       return { left: left + '%', right: right + '%' };
     });
+
+    function handleToggleSegment(index) {
+      import('../store.js').then(module => {
+        module.toggleSegment(index);
+      });
+    }
+
+    function handleRemoveSplit(index) {
+      import('../store.js').then(module => {
+        module.removeSplitPoint(index);
+      });
+    }
 
     // Track inner width style for zoomed content
     const trackInnerStyle = computed(() => ({
@@ -465,9 +450,8 @@ export default {
       trimIn, trimOut, trimRegionStyle, onTrimMarkerMouseDown, trimDrag,
       // Speaker support
       uniqueSpeakers, hasSpeakers, speakerGroups, speakerLabel, speakerLabelColor,
-      hookMarker,
       // Split / Undo / Redo
-      segments, hasSplitPoints, handleCut, handleToggleSegment, handleRemoveSplit,
+      segments, hasSplitPoints, handleToggleSegment, handleRemoveSplit,
       undoAction, redoAction, undoCount, redoCount, undoLabel, redoLabel,
       store,
     };
@@ -486,9 +470,6 @@ export default {
           </button>
 
           <div class="timeline-edit-controls">
-            <button class="timeline-edit-btn timeline-cut-btn" @click="handleCut" title="Cut at playhead (S)">
-              ✂ Cut
-            </button>
             <button class="timeline-edit-btn timeline-undo-btn" @click="undoAction" :disabled="undoCount === 0" :title="undoLabel">
               ↩ <span v-if="undoCount > 0" class="edit-count">{{ undoCount }}</span>
             </button>
@@ -545,6 +526,7 @@ export default {
               <div class="split-line-head">✂</div>
             </div>
 
+
             <!-- Played bar -->
             <div class="timeline-played" :style="{ width: pct(currentTime) + '%' }"></div>
 
@@ -576,12 +558,6 @@ export default {
             </div>
 
             <!-- Hook marker -->
-            <div v-if="hookMarker"
-                 class="timeline-hook-marker"
-                 :style="{ left: pct(hookMarker.start) + '%', width: Math.max(0.3, pct(hookMarker.end) - pct(hookMarker.start)) + '%' }"
-                 :title="'🎣 Hook: ' + hookMarker.reason">
-              <span class="hook-label">🎣 HOOK</span>
-            </div>
 
             <!-- Multi-speaker layout -->
             <template v-if="hasSpeakers">
