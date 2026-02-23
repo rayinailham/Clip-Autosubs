@@ -19,7 +19,6 @@ export default {
     const sortMode = ref('newest');
 
     const doCutSilence = ref(true);
-    const doLlmFilter = ref(true);
     const doGrouping = ref(true);
 
     const processedUploads = computed(() => {
@@ -151,7 +150,6 @@ export default {
           transcription_model: store.transcriptionModel,
           elevenlabs_api_key: store.transcriptionModel === 'scribe_v2' ? store.elevenlabsApiKey.trim() : null,
           do_cut_silence: doCutSilence.value,
-          do_llm_filter: doLlmFilter.value,
           do_grouping: doGrouping.value
         });
         store.refine.jobId = job_id;
@@ -195,7 +193,6 @@ export default {
       store.metadata = data.metadata || {};
       store.speakers = data.speakers || {};
       store.hiddenWordIndices = data.hidden_indices || [];
-      store.hook = data.hook || null;
 
       // Apply smart groups
       if (data.groups && data.groups.length > 0) {
@@ -259,6 +256,7 @@ export default {
         }
       }
 
+
       // Navigate to editor
       store.appMode = 'subtitle';
       store.currentView = 'editor';
@@ -309,7 +307,7 @@ export default {
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads, collapsedFolders, toggleFolder,
-      doCutSilence, doLlmFilter, doGrouping, deleteFile,
+      doCutSilence, doGrouping, deleteFile,
     };
   },
   template: `
@@ -321,7 +319,7 @@ export default {
         <!-- Hero -->
         <div class="upload-hero">
           <h2 style="background: linear-gradient(135deg, #f7b733 0%, #fc4a1a 100%); -webkit-background-clip: text; color: transparent;">✨ Auto-Refine</h2>
-          <p>Upload a vertical video and let AI do the rest: transcribe, identify speakers, smart-group, cut silences, and find hooks.</p>
+          <p>Upload a vertical video and let AI do the rest: transcribing, fast silence cutting, and smart-grouping.</p>
         </div>
 
         <!-- Upload Card -->
@@ -385,10 +383,6 @@ export default {
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
               <input type="checkbox" v-model="doCutSilence" />
               <span><strong>Cut Silences:</strong> Automatically remove awkward pauses and long gaps.</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
-              <input type="checkbox" v-model="doLlmFilter" />
-              <span><strong>LLM Filtering (AI):</strong> Remove excessive rambling and hide overlapping speakers.</span>
             </label>
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
               <input type="checkbox" v-model="doGrouping" />

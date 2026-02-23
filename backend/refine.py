@@ -81,54 +81,23 @@ You are a professional video editor and subtitle expert. You will be given a wor
 transcript with timestamps from a video. Perform ALL of the following tasks and \
 return ONLY valid JSON (no markdown, no explanation).
 
-═══ TASK 1 — HOOK IDENTIFICATION ═══
-Find the single most engaging, "scroll-stopping" moment that would work best as \
-the opening of a short-form vertical video. Prioritize:
-- Surprising or provocative statements
-- Emotional peaks
-- Interesting questions
-- Key insights or revelations
-Return the word index range of the hook.
-
-═══ TASK 2 — OVERLAP HANDLING ═══
-If there are words with overlapping time ranges (multiple people talking at the \
-same time), decide which words are MORE important and mark the LESS \
-important overlapping words for hiding. If no overlaps exist, return an empty list.
-
-═══ TASK 3 — WASTED TIME REMOVAL ═══
-Identify portions of the transcript where the speaker is excessively rambling, \
-going off-topic, or just wasting time with unnecessary filler words. Mark the indices \
-of these words to be cut out. Be brutal with cutting out boring parts to maintain \
-audience retention, but do NOT cut out the hook or important context/punchlines. \
-If no words should be cut, return an empty list.
-
-═══ TASK 4 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
+═══ TASK 1 — TRANSCRIPT OPTIMIZATION (HYBRID MODE) ═══
 You may be provided with TWO transcripts:
 - SOURCE A (WhisperX): Word-level timing, but might have misspellings or poor punctuation.
 - SOURCE B (YouTube CC): Better spelling for names/brands and more natural sentence grouping.
 
 Compare them. If SOURCE B exists, use its spelling and punctuation to correct SOURCE A. ONLY return words in 'optimized_words' that actually needed correcting (i.e. changing the text from SOURCE A). Do NOT return words that are unchanged.
 
-═══ TASK 5 — SMART SUBTITLE GROUPING (IMPORTANT) ═══
-Group the REMAINING words into natural subtitle display chunks that are EASY TO READ as captions.
-Rules (STRICT):
-- Exclude ANY word indices you marked in Tasks 2 and 3 (hidden or wasted). Only group the words that are actually kept!
-- Create natural, phrase-based groups that are easy to read. Do NOT arbitrarily limit length, but keep them easy to digest.
-- MINIMUM 2 words per group, UNLESS a single word is isolated by a significant time gap (>1.0 second) from surrounding words. Pay attention to START and END timestamps!
-  → The word AFTER a period starts a NEW group
-- Break at natural pauses (commas, colons, semicolons, dashes)
-- Keep short phrases together ("you know", "I mean", "of course")
-- Provide the explicit array of `word_indices` for each group, so that gaps from cut words are naturally skipped.
+═══ TASK 2 — SMART SUBTITLE GROUPING (IMPORTANT & FOOLPROOF) ═══
+Group the words into perfectly natural, readable subtitle chunks. You MUST strictly obey these rules:
+- MINIMUM 2 words per group. The ONLY exception is if a word has a >1.0s gap from its neighbors. DO NOT create random 1-word groups.
+- MAXIMUM 6-8 words per group so they fit well on a vertical screen.
+- NEVER split grammatical pairs (e.g., keep "going to", "to be", "I am" together).
+- NEW GROUP triggers: ALWAYS start a new group after sentence-ending punctuation (`.`, `?`, `!`) or strong pauses like commas.
+- Provide the explicit array of `word_indices` for each group. They must flow consecutively without repeating indices.
 
 ═══ RESPONSE FORMAT ═══
 {
-  "hook": {
-    "word_index_start": 10,
-    "word_index_end": 25,
-    "reason": "Why this is the best hook"
-  },
-  "hidden_word_ranges": [],
-  "wasted_word_ranges": [],
   "optimized_words": [
      {"index": 0, "text": "Corrected word"}
   ],
@@ -142,11 +111,6 @@ If you return 'optimized_words', ONLY include the specific words you corrected b
 """
 
 
-class HookModel(BaseModel):
-    word_index_start: int
-    word_index_end: int
-    reason: str
-
 class WordRangeModel(BaseModel):
     start_index: int
     end_index: int
@@ -159,16 +123,13 @@ class WordGroupModel(BaseModel):
     word_indices: list[int]
 
 class RefineResponseModel(BaseModel):
-    hook: Optional[HookModel] = None
-    hidden_word_ranges: list[WordRangeModel] = Field(default_factory=list)
-    wasted_word_ranges: list[WordRangeModel] = Field(default_factory=list)
     optimized_words: list[OptimizedWordModel] = Field(default_factory=list)
     groups: list[WordGroupModel] = Field(default_factory=list)
 
 def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optional[str] = None) -> dict:
     """
     Send word-level transcript to Gemini for speaker identification,
-    smart grouping, hook detection, and overlap handling.
+    smart grouping and overlap handling.
     
     If reference_text (YouTube captions) is provided, Gemini will use it
      to improve spelling and punctuation.
@@ -403,7 +364,6 @@ def refine_video(
     min_silence_ms: int = 500,
     padding_ms: int = 100,
     do_cut_silence: bool = True,
-    do_llm_filter: bool = True,
     do_grouping: bool = True,
     progress_cb: Optional[Callable[[str, str], None]] = None,
 ) -> dict:
@@ -420,7 +380,7 @@ def refine_video(
         progress_cb:     Callback(step, message) for progress updates.
 
     Returns:
-        dict with video_filename, words (with speakers), groups, hook,
+        dict with video_filename, words (with speakers), groups,
         speakers, hidden_indices, silence_stats, metadata.
     """
     def log(step: str, msg: str):
@@ -522,7 +482,7 @@ def refine_video(
                     search_dirs.append(pot_uploads)
             
             for d in search_dirs:
-                matches = list(d.glob(f"{prefix}*.yt_captions.json"))
+                matches = list(d.rglob(f"{prefix}*.yt_captions.json"))
                 if matches:
                     yt_caps_path = matches[0]
                     break
@@ -540,7 +500,7 @@ def refine_video(
     # ── Step 4: Gemini analysis ─────────────────────────────
     log("analyze", "Sending transcript to Gemini AI…")
 
-    if do_llm_filter or do_grouping:
+    if do_grouping:
         analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text)
         log("analyze", "Gemini analysis complete")
     else:
@@ -565,35 +525,9 @@ def refine_video(
             if isinstance(idx, int) and 0 <= idx < len(adjusted_words) and text:
                 adjusted_words[idx]["text"] = text
 
-    # 4b — Hidden (overlapping, less-important words)
+    # We don't hide words anymore
     hidden_indices = []
-    if do_llm_filter:
-        for r in analysis.get("hidden_word_ranges", []):
-            if isinstance(r, dict):
-                start_idx = r.get("start_index", r.get("word_index_start"))
-                end_idx = r.get("end_index", r.get("word_index_end"))
-                if start_idx is not None and end_idx is not None:
-                    hidden_indices.extend(range(start_idx, end_idx + 1))
-            elif isinstance(r, (list, tuple)) and len(r) >= 2:
-                hidden_indices.extend(range(r[0], r[1] + 1))
-        hidden_indices.extend(analysis.get("hidden_word_indices", []))
-        hidden_indices = [i for i in hidden_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
-
-    # 4c — Wasted (rambling, unnecessary words)
-    wasted_indices = []
-    if do_llm_filter:
-        for r in analysis.get("wasted_word_ranges", []):
-            if isinstance(r, dict):
-                start_idx = r.get("start_index", r.get("word_index_start"))
-                end_idx = r.get("end_index", r.get("word_index_end"))
-                if start_idx is not None and end_idx is not None:
-                    wasted_indices.extend(range(start_idx, end_idx + 1))
-            elif isinstance(r, (list, tuple)) and len(r) >= 2:
-                wasted_indices.extend(range(r[0], r[1] + 1))
-        wasted_indices.extend(analysis.get("wasted_word_indices", []))
-        wasted_indices = [i for i in wasted_indices if isinstance(i, int) and 0 <= i < len(adjusted_words)]
-
-    excluded_indices = set(hidden_indices + wasted_indices)
+    excluded_indices = set()
 
     # 4d — Groups (validate, fallback if needed)
     raw_groups = analysis.get("groups", [])
@@ -620,9 +554,6 @@ def refine_video(
             if "speaker" not in g:
                 g["speaker"] = gw[0].get("speaker", "SPEAKER_00")
 
-    # 4e — Hook
-    hook = analysis.get("hook", None)
-
     # 4f — Speakers info
     seen_speakers = {w.get("speaker", "SPEAKER_00") for w in adjusted_words}
     speakers = {spk: spk.replace("_", " ").title() for spk in seen_speakers}
@@ -635,10 +566,7 @@ def refine_video(
         "original_filename": video_path.name,
         "words": adjusted_words,
         "groups": groups,
-        "hook": hook,
         "speakers": speakers,
-        "hidden_indices": hidden_indices,
-        "wasted_indices": wasted_indices,
         "metadata": metadata,
         "silence_stats": {
             "original_duration_s": stats["original_duration_s"],

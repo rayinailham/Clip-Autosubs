@@ -219,7 +219,6 @@ class RefineRequest(BaseModel):
     min_silence_ms: int = 500
     padding_ms: int = 100
     do_cut_silence: bool = True
-    do_llm_filter: bool = True
     do_grouping: bool = True
 
 
@@ -1152,7 +1151,6 @@ def _do_refine(job_id: str, req: RefineRequest):
             min_silence_ms=req.min_silence_ms,
             padding_ms=req.padding_ms,
             do_cut_silence=req.do_cut_silence,
-            do_llm_filter=req.do_llm_filter,
             do_grouping=req.do_grouping,
             progress_cb=progress,
         )

@@ -38,14 +38,12 @@ export default {
           <h2 class="home-card-title">Auto-Refine</h2>
           <p class="home-card-desc">
             Drop a vertical video and let AI handle everything: transcribe,
-            identify speakers, cut silences, create smart subtitles, and
-            find the best hook — all in one click.
+            identify speakers, remove silences and smart-group your subtitles — all in one click.
           </p>
           <div class="home-card-tags">
             <span class="tag">Speaker ID</span>
             <span class="tag">Smart groups</span>
             <span class="tag">Silence cut</span>
-            <span class="tag">Hook finder</span>
             <span class="tag">Gemini AI</span>
           </div>
           <button class="btn btn-refine home-card-btn">Get Started →</button>

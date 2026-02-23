@@ -28,27 +28,20 @@ export default {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable) return;
 
       // Ctrl+Z / Cmd+Z = Undo
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         undoAction();
         return;
       }
       // Ctrl+Y / Cmd+Shift+Z = Redo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
         e.preventDefault();
         redoAction();
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         redoAction();
-        return;
-      }
-      // S = Split / Cut at playhead
-      if (e.key === 's' || e.key === 'S') {
-        if (e.ctrlKey || e.metaKey) return; // Don't intercept Ctrl+S
-        e.preventDefault();
-        addSplitAtPlayhead();
         return;
       }
       // Space = Play/Pause

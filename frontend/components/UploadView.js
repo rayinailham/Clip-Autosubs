@@ -247,39 +247,7 @@ export default {
             <input type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
           </label>
         </div>
-        <button v-if="store.transcriptionModel !== 'scribe_v2'" class="btn btn-ghost btn-sm" @click="showDiarize = !showDiarize"
-                style="font-size: 0.78rem; display: flex; align-items: center; gap: 0.4rem; color: var(--text-dim);">
-          <span style="font-size: 0.6rem;">{{ showDiarize ? '▼' : '▶' }}</span>
-          🎤 Speaker Diarization
-          <span v-if="store.diarization.hfToken" style="color: var(--success); font-size: 0.65rem;">● Active</span>
-        </button>
-        <div v-if="showDiarize && store.transcriptionModel !== 'scribe_v2'" class="diarize-panel"
-             style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
-                    padding: 0.75rem 1rem; margin-top: 0.35rem;">
-          <p style="font-size: 0.72rem; color: var(--text-dim); margin-bottom: 0.5rem; line-height: 1.45;">
-            Enable speaker detection by providing a
-            <a href="https://huggingface.co/settings/tokens" target="_blank"
-               style="color: var(--accent2);">HuggingFace token</a>
-            with access to
-            <a href="https://huggingface.co/pyannote/speaker-diarization-3.1" target="_blank"
-               style="color: var(--accent2);">pyannote/speaker-diarization-3.1</a>.
-          </p>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <input type="password" v-model="store.diarization.hfToken"
-                   placeholder="hf_xxxxxxxxxx…"
-                   style="flex: 1; padding: 6px 10px; background: var(--surface2); border: 1px solid var(--border);
-                          border-radius: 5px; color: var(--text); font-size: 0.8rem; outline: none;
-                          font-family: monospace;" />
-            <label style="font-size: 0.72rem; color: var(--text-dim); white-space: nowrap;">
-              Max speakers
-              <input type="number" v-model.number="store.diarization.maxSpeakers"
-                     min="2" max="10" placeholder="auto"
-                     style="width: 50px; padding: 5px 6px; margin-left: 4px; background: var(--surface2);
-                            border: 1px solid var(--border); border-radius: 5px; color: var(--text);
-                            font-size: 0.8rem; text-align: center; outline: none;" />
-            </label>
-          </div>
-        </div>
+
       </div>
 
       <!-- Progress -->
