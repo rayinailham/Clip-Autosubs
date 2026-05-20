@@ -380,7 +380,7 @@ from a video transcript. The user will tell you their criteria. You must return 
 
 Rules:
 - Each clip should be a self-contained, engaging moment.
-- Minimum clip duration: 30 seconds. Maximum: 4 minutes (240 seconds).
+- Minimum clip duration: 60 seconds. Maximum: 4 minutes (240 seconds).
 - Include some context before and after the key moment (a few seconds).
 - Do not overlap clips unless they represent clearly distinct highlights.
 - Return 3–15 clips unless the user specifically asks for more or fewer.
@@ -442,7 +442,7 @@ Transcript (format: [HH:MM:SS] text):
 """
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3-flash-preview",
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             system_instruction=_SYSTEM_PROMPT,

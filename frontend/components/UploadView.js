@@ -224,7 +224,7 @@ export default {
                  accept=".mp4,.mkv,.avi,.mov,.webm,.mp3,.wav,.flac,.m4a,.ogg" />
           <span class="upload-icon">🎬</span>
           <h2>Drop a video or audio file</h2>
-          <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV — up to 500 MB</p>
+          <p>MP4, MKV, AVI, MOV, WEBM, MP3, WAV — No size limit</p>
         </div>
       </div>
 

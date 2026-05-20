@@ -329,7 +329,7 @@ export default {
                    accept=".mp4,.mkv,.avi,.mov,.webm" />
             <span class="upload-icon">🎬</span>
             <h2>Drop a video file</h2>
-            <p>MP4, MKV, AVI, MOV, WEBM — up to 500 MB</p>
+            <p>MP4, MKV, AVI, MOV, WEBM — No size limit</p>
           </div>
         </div>
         <div class="transcribe-progress" :class="{ active: uploading }">

@@ -337,7 +337,7 @@ export default {
             </div>
             <div v-else>
               <h2>Drop a vertical video</h2>
-              <p>MP4, MOV, WEBM — up to 500 MB</p>
+              <p>MP4, MOV, WEBM — No size limit</p>
             </div>
           </div>
         </div>
