@@ -54,7 +54,7 @@ ALLOWED_EXTENSIONS = {
     ".mp4", ".mkv", ".avi", ".mov", ".webm",
     ".mp3", ".wav", ".flac", ".m4a", ".ogg",
 }
-MAX_FILE_SIZE_MB = 500
+MAX_FILE_SIZE_MB = 100000  # Increased to naturally allow huge files
 
 # ─── In-memory render job tracker ────────────────────────────
 render_jobs: dict = {}

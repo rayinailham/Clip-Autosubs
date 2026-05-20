@@ -21,7 +21,11 @@ export default {
       store.appMode = 'refine';
     }
 
-    return { goSubtitle, goVtuber, goYtClipper, goRefine };
+    function goSilenceCutOnly() {
+      store.appMode = 'silencecut';
+    }
+
+    return { goSubtitle, goVtuber, goYtClipper, goRefine, goSilenceCutOnly };
   },
   template: `
     <div class="home-view">
@@ -97,6 +101,20 @@ export default {
             <span class="tag">Auto-clip</span>
           </div>
           <button class="btn btn-yt home-card-btn">Get Started →</button>
+        </div>
+
+        <!-- Fast Silence Cut card -->
+        <div class="home-card" @click="goSilenceCutOnly" style="background: var(--surface2);">
+          <div class="home-card-icon">✂️</div>
+          <h2 class="home-card-title">Fast Silence Cut</h2>
+          <p class="home-card-desc">
+            Just want to remove silence from your video? Upload your file and let AI cut the gaps instantly without adding subtitles.
+          </p>
+          <div class="home-card-tags">
+            <span class="tag">No Subtitles</span>
+            <span class="tag">Fast Cut</span>
+          </div>
+          <button class="btn btn-outline home-card-btn">Get Started →</button>
         </div>
 
       </div>

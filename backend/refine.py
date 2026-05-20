@@ -163,7 +163,7 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
     prompt = "".join(prompt_parts)
 
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3-flash-preview",
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             system_instruction=_REFINE_SYSTEM_PROMPT,

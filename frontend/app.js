@@ -7,9 +7,10 @@ import EditorView from './components/EditorView.js';
 import ReframeView from './components/ReframeView.js';
 import YtClipperView from './components/YtClipperView.js';
 import RefineView from './components/RefineView.js';
+import SilenceCutOnlyView from './components/SilenceCutOnlyView.js';
 
 const App = {
-  components: { AppHeader, HomeView, UploadView, EditorView, ReframeView, YtClipperView, RefineView },
+  components: { AppHeader, HomeView, UploadView, EditorView, ReframeView, YtClipperView, RefineView, SilenceCutOnlyView },
   setup() {
     return { store };
   },
@@ -23,6 +24,7 @@ const App = {
     <ReframeView    v-else-if="store.appMode === 'vtuber'" />
     <YtClipperView  v-else-if="store.appMode === 'ytclipper'" />
     <RefineView     v-else-if="store.appMode === 'refine'" />
+    <SilenceCutOnlyView v-else-if="store.appMode === 'silencecut'" />
   `,
 };
 
