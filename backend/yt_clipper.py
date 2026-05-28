@@ -950,7 +950,13 @@ def download_video(
     for c_idx, cookie_opt in enumerate(cookie_opts):
         try:
             ydl_opts = {
-                "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
+                # Prefer 1080p (any codec: avc1/vp9/av1), then merge into MP4 container.
+                # Filtering [ext=mp4] alone caps at 720p because YouTube serves 1080p as VP9/AV1 in webm.
+                "format": (
+                    "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/"
+                    "bestvideo[height<=1080]+bestaudio/"
+                    "best[height<=1080]/best"
+                ),
                 "merge_output_format": "mp4",
                 "outtmpl": outtmpl,
                 "quiet": True,
@@ -1141,26 +1147,6 @@ def download_and_cut_clips(
         )
 
         filename = out_path.name
-
-        # Save reference YouTube captions for this specific clip (if available)
-        if yt_transcript and yt_transcript.get("segments"):
-            clip_start = clip["start"]
-            clip_end = clip["end"]
-            clip_segments = []
-            for seg in yt_transcript["segments"]:
-                if seg["start"] < clip_end and seg["end"] > clip_start:
-                    shifted = {
-                        "start": round(max(0, seg["start"] - clip_start), 3),
-                        "end": round(seg["end"] - clip_start, 3),
-                        "text": seg["text"]
-                    }
-                    clip_segments.append(shifted)
-            
-            if clip_segments:
-                cap_path = out_path.with_suffix(".yt_captions.json")
-                with open(cap_path, "w", encoding="utf-8") as f:
-                    json.dump({"segments": clip_segments}, f, indent=2, ensure_ascii=False)
-                log.info("Saved reference captions: %s", cap_path.name)
 
         results.append({
             "id": clip["id"],
