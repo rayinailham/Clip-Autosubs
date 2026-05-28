@@ -1,35 +1,11 @@
 import { ref, computed } from 'vue';
 import store, { regenerateAutoGroups, saveUndoSnapshot } from '../store.js';
-import { DYNAMIC_PRESETS } from '../presets/dynamicPresets.js';
 import { STATIC_PRESETS } from '../presets/staticPresets.js';
-import { EMOTION_PRESETS } from '../presets/emotionPresets.js';
 
 export default {
   name: 'StyleSidebar',
   setup() {
-    const currentDynamicPreset = ref('natural');
     const currentStaticPreset = ref('natural');
-    const emotionInfo = ref('Select words, then click an emotion to apply');
-    const emotionWarning = ref(false);
-
-    // Dynamic preset info for template
-    const dynamicIconMap = {
-      natural:   { icon: '✨', iconText: null,    iconClass: '' },
-      vtuber:    { icon: '🔥', iconText: null,    iconClass: '' },
-      neon:      { icon: '',   iconText: 'RAVE',  iconClass: 'neon-text' },
-      anime:     { icon: '',   iconText: 'アニメ', iconClass: 'anime-text' },
-      clean:     { icon: '',   iconText: 'PRO',   iconClass: '' },
-      retro:     { icon: '',   iconText: 'GAME',  iconClass: 'retro-text' },
-      idol:      { icon: '💗', iconText: null,    iconClass: '' },
-      newsflash: { icon: '📰', iconText: null,    iconClass: '' },
-      cybergold: { icon: '',   iconText: 'GOLD',  iconClass: 'neon-text' },
-      horror:    { icon: '💀', iconText: null,    iconClass: '' },
-    };
-    const dynamicPresetList = Object.entries(DYNAMIC_PRESETS).map(([key, p]) => ({
-      key,
-      name: p.name,
-      ...(dynamicIconMap[key] || { icon: '✨', iconText: null, iconClass: '' }),
-    }));
 
     const staticPresetList = [
       { key: 'natural',    icon: '✨', name: 'Natural' },
@@ -44,31 +20,6 @@ export default {
       { key: 'boldstrike', icon: '⚡', name: 'Bold Strike' },
     ];
 
-    const emotionList = [
-      { key: 'angry', label: '😡 Angry' },
-      { key: 'creepy', label: '👻 Creepy' },
-      { key: 'shy', label: '😳 Shy' },
-      { key: 'gloomy', label: '😔 Gloomy' },
-      { key: 'bright', label: '☀️ Bright' },
-      { key: 'energetic', label: '⚡ Energetic' },
-      { key: 'obnoxious', label: '🤪 Obnoxious' },
-      { key: 'romantic', label: '💕 Romantic' },
-    ];
-
-    function applyDynamicPreset(key) {
-      const p = DYNAMIC_PRESETS[key]; if (!p) return;
-      saveUndoSnapshot('Apply preset: ' + p.name);
-      currentDynamicPreset.value = key;
-      Object.assign(store.style, {
-        fontFamily: p.fontFamily, fontSize: p.fontSize, bold: p.bold, italic: p.italic,
-        uppercase: p.uppercase, highlight: p.highlight, textColor: p.textColor,
-        outlineColor: p.outlineColor, shadowColor: p.shadowColor, outline: p.outline,
-        shadow: p.shadow, glow: p.glow, glowColor: p.glowColor, scale: p.scale,
-        animation: p.animation, groupAnimation: p.groupAnimation, animSpeed: p.animSpeed, animIntensity: p.animIntensity || 100,
-      });
-      if (!store.useCustomGroups) regenerateAutoGroups();
-    }
-
     function applyStaticPreset(key) {
       const p = STATIC_PRESETS[key]; if (!p) return;
       saveUndoSnapshot('Apply preset: ' + p.name);
@@ -81,34 +32,6 @@ export default {
         sentenceAnimation: p.sentenceAnimation, staticAnimSpeed: p.animSpeed, animIntensity: p.animIntensity || 100,
       });
       if (!store.useCustomGroups) regenerateAutoGroups();
-    }
-
-    function setSubtitleMode(mode) {
-      store.useDynamicMode = (mode === 'dynamic');
-      if (store.useDynamicMode) applyDynamicPreset('natural');
-      else applyStaticPreset('natural');
-    }
-
-    function applyEmotion(key) {
-      const emotion = EMOTION_PRESETS[key]; if (!emotion) return;
-      if (store.selectedWordIndices.size === 0) {
-        emotionInfo.value = '⚠️ Select words first, then apply emotion';
-        emotionWarning.value = true;
-        setTimeout(() => { emotionInfo.value = 'Select words, then click an emotion to apply'; emotionWarning.value = false; }, 2000);
-        return;
-      }
-      const baseFontSize = store.style.fontSize || 80;
-      saveUndoSnapshot('Apply emotion: ' + emotion.name);
-      store.selectedWordIndices.forEach(idx => {
-        if (!store.words[idx].style) store.words[idx].style = {};
-        store.words[idx].style.highlight_color = emotion.highlight_color;
-        store.words[idx].style.normal_color = emotion.normal_color;
-        store.words[idx].style.outline_color = emotion.outline_color;
-        if (emotion.font_name) store.words[idx].style.font_name = emotion.font_name;
-        if (emotion.font_size_mult) store.words[idx].style.font_size = Math.round(baseFontSize * emotion.font_size_mult);
-      });
-      emotionInfo.value = '✓ Applied "' + emotion.name + '" to ' + store.selectedWordIndices.size + ' word(s)';
-      setTimeout(() => { emotionInfo.value = 'Select words, then click an emotion to apply'; }, 2000);
     }
 
     // Per-word style
@@ -151,49 +74,18 @@ export default {
     }
 
     return {
-      store, currentDynamicPreset, currentStaticPreset,
-      dynamicPresetList, staticPresetList, emotionList,
-      emotionInfo, emotionWarning,
-      applyDynamicPreset, applyStaticPreset, setSubtitleMode, applyEmotion,
+      store, currentStaticPreset,
+      staticPresetList,
+      applyStaticPreset,
       wordHighlight, wordNormal, wordFontSize, wordOutline,
       selectedWordsInfo, applyWordStyle, clearWordStyles,
       regenerateAutoGroups, onPositionPreset,
     };
   },
   template: `
-    <!-- Subtitle Mode -->
-    <div class="style-section mode-section">
-      <div class="style-section-title">Subtitle Mode</div>
-      <div class="mode-toggle-row">
-        <button class="mode-toggle-btn" :class="{ active: store.useDynamicMode }" @click="setSubtitleMode('dynamic')">
-          <span class="mode-icon">🔤</span>
-          <span class="mode-label">Dynamic</span>
-          <span class="mode-desc">Per-word highlighting</span>
-        </button>
-        <button class="mode-toggle-btn" :class="{ active: !store.useDynamicMode }" @click="setSubtitleMode('static')">
-          <span class="mode-icon">📝</span>
-          <span class="mode-label">Static</span>
-          <span class="mode-desc">Sentence at a time</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Dynamic Presets -->
-    <div v-if="store.useDynamicMode" class="style-section preset-section">
-      <div class="style-section-title">Dynamic Presets</div>
-      <div class="preset-grid">
-        <button v-for="p in dynamicPresetList" :key="p.key"
-                class="preset-btn" :class="{ active: currentDynamicPreset === p.key }"
-                @click="applyDynamicPreset(p.key)">
-          <span class="preset-icon" :class="p.iconClass">{{ p.iconText || p.icon }}</span>
-          <span class="preset-name">{{ p.name }}</span>
-        </button>
-      </div>
-    </div>
-
     <!-- Static Presets -->
-    <div v-if="!store.useDynamicMode" class="style-section preset-section">
-      <div class="style-section-title">Static Presets</div>
+    <div class="style-section preset-section">
+      <div class="style-section-title">Style Presets</div>
       <div class="preset-grid">
         <button v-for="p in staticPresetList" :key="p.key"
                 class="preset-btn static-preset" :class="{ active: currentStaticPreset === p.key }"
@@ -202,16 +94,6 @@ export default {
           <span class="preset-name">{{ p.name }}</span>
         </button>
       </div>
-    </div>
-
-    <!-- Emotions (dynamic only) -->
-    <div v-if="store.useDynamicMode" class="style-section emotion-section">
-      <div class="style-section-title">Emotion Styles</div>
-      <div class="emotion-grid">
-        <button v-for="e in emotionList" :key="e.key" class="emotion-btn"
-                :data-emotion="e.key" @click="applyEmotion(e.key)">{{ e.label }}</button>
-      </div>
-      <div class="emotion-info" :class="{ warning: emotionWarning }">{{ emotionInfo }}</div>
     </div>
 
     <!-- Font -->
@@ -258,13 +140,7 @@ export default {
     <!-- Colors -->
     <div class="style-section">
       <div class="style-section-title">Colors</div>
-      <div v-if="store.useDynamicMode" class="style-row">
-        <label>Highlight</label>
-        <input type="color" v-model="store.style.highlight" />
-        <label style="margin-left:0.5rem">Normal</label>
-        <input type="color" v-model="store.style.textColor" />
-      </div>
-      <div v-else class="style-row">
+      <div class="style-row">
         <label>Text Color</label>
         <input type="color" v-model="store.style.textColor" />
       </div>
@@ -298,58 +174,10 @@ export default {
         <label>Glow Color</label>
         <input type="color" v-model="store.style.glowColor" />
       </div>
-      <div v-if="store.useDynamicMode" class="style-row">
-        <label>Scale %</label>
-        <input type="range" min="100" max="150" v-model.number="store.style.scale" />
-        <input type="number" class="range-val-input" v-model.number="store.style.scale" min="100" max="150" />
-      </div>
-    </div>
-
-    <!-- Dynamic Animation -->
-    <div v-if="store.useDynamicMode" class="style-section">
-      <div class="style-section-title">Word Animation</div>
-      <div class="style-row">
-        <label>Highlight</label>
-        <select v-model="store.style.animation">
-          <option value="color-only">Color Only</option>
-          <option value="scale">Scale</option>
-          <option value="bounce">Bounce</option>
-          <option value="none">None</option>
-        </select>
-      </div>
-      <div class="style-row">
-        <label>Group Anim</label>
-        <select v-model="store.style.groupAnimation">
-          <option value="none">None</option>
-          <option value="fade-in">Fade In</option>
-          <option value="slide-up">Slide Up</option>
-          <option value="slide-down">Slide Down</option>
-          <option value="slide-left">Slide Left</option>
-          <option value="slide-right">Slide Right</option>
-          <option value="pop-in">Pop In</option>
-          <option value="bounce">Bounce / Drop</option>
-          <option value="blur-in">Blur In</option>
-          <option value="stretch">Stretch</option>
-          <option value="zoom-drop">Zoom Drop</option>
-          <option value="flip-in">Flip In</option>
-          <option value="typewriter">Typewriter</option>
-          <option value="cascade">Cascade Pop</option>
-        </select>
-      </div>
-      <div class="style-row">
-        <label>Anim Speed</label>
-        <input type="range" min="100" max="500" v-model.number="store.style.animSpeed" />
-        <input type="number" class="range-val-input" v-model.number="store.style.animSpeed" min="100" max="500" /><span class="range-unit">ms</span>
-      </div>
-      <div class="style-row">
-        <label>Effects Amt</label>
-        <input type="range" min="0" max="250" v-model.number="store.style.animIntensity" />
-        <input type="number" class="range-val-input" v-model.number="store.style.animIntensity" min="0" max="250" /><span class="range-unit">%</span>
-      </div>
     </div>
 
     <!-- Static Animation -->
-    <div v-if="!store.useDynamicMode" class="style-section">
+    <div class="style-section">
       <div class="style-section-title">Sentence Animation</div>
       <div class="style-row">
         <label>Entrance</label>
