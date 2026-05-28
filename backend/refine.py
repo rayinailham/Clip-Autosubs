@@ -26,6 +26,9 @@ except ImportError:
 
 from transcribe import transcribe_video
 from renderer import get_video_info
+from logger import get_logger
+
+log = get_logger("refine")
 
 
 # ─── Gemini Analysis ────────────────────────────────────────
@@ -50,6 +53,46 @@ Group the words into perfectly natural, readable subtitle chunks. You MUST stric
 - NEW GROUP triggers: ALWAYS start a new group after sentence-ending punctuation (`.`, `?`, `!`) or strong pauses like commas.
 - Provide the explicit array of `word_indices` for each group. They must flow consecutively without repeating indices.
 
+═══ TASK 3 — PER-GROUP ENGLISH TRANSLATION ═══
+For EACH group you produce, also produce a `translation` field containing a natural,
+fluent English rendering of that group's content.
+- If SOURCE A is Japanese (or any non-English language), translate the GROUPED
+  phrase as a whole — never word-by-word. Word-by-word machine translation reads
+  unnatural and breaks idioms; translate the meaning.
+- If SOURCE A is already English, copy the joined group text into `translation`
+  verbatim (lightly cleaned — keep capitalization and punctuation natural).
+
+VOICE & REGISTER (very important):
+- Target voice = a casual American high-schooler talking on stream / to friends.
+  Think relaxed, spoken, everyday English. NOT formal. NOT literary. NOT
+  textbook-translation stiff.
+- Use natural contractions: "I'm", "it's", "don't", "gonna", "wanna", "kinda".
+- Sprinkle light, common slang where it fits the mood — but tastefully, not
+  every line. Acceptable: "bro", "dude", "lowkey", "ngl", "bruh", "no way",
+  "for real", "kinda", "literally", "so good", "wild", "nah", "yeah", "okay
+  okay", "wait what". Reactions like "let's gooo", "oh my god", "what the
+  heck" are fine in hype moments.
+- AVOID: cringe / overused / forced Gen-Alpha brainrot ("skibidi", "rizz",
+  "gyatt", "fanum tax", "sigma", "ohio", "mewing", "edging it") — never use
+  those. They date the subtitles and read corny.
+- AVOID: profanity stronger than "damn" / "hell" / "crap" unless the source is
+  clearly cursing — keep it streamer-safe by default.
+- AVOID: textbook phrasings like "I am going to", "It is very interesting",
+  "Indeed", "Truly", "Henceforth". Real teens don't talk like that.
+- Match the energy of the moment: hype scene → punchy and excited; calm
+  exposition → chill and conversational; confused reaction → "huh?", "wait
+  what", "no way".
+
+LENGTH & FIT:
+- Keep the translation tight enough to fit a vertical-video subtitle line
+  (roughly the same length budget as the source group). Prefer concise, spoken
+  English over literal long renderings.
+- Preserve names, brands, and proper nouns from SOURCE B (YouTube CC) when
+  available — do not romanize or "translate" names that are already English.
+- Never leave `translation` null. If a group is purely interjection/laugh and has
+  no meaningful content, still emit a sensible English equivalent (e.g. "Haha",
+  "Wait what", "Yeah", "Bro", "No way").
+
 ═══ RESPONSE FORMAT ═══
 Return ONLY valid JSON, no markdown, no commentary. The JSON object MUST have BOTH keys present, even when empty:
 {
@@ -57,8 +100,8 @@ Return ONLY valid JSON, no markdown, no commentary. The JSON object MUST have BO
      {"index": 0, "text": "Corrected word"}
   ],
   "groups": [
-    {"word_indices": [0, 1, 2]},
-    {"word_indices": [6, 7]}
+    {"word_indices": [0, 1, 2], "translation": "English version of these words."},
+    {"word_indices": [6, 7],    "translation": "Next chunk in English."}
   ]
 }
 Rules for `optimized_words`:
@@ -67,6 +110,7 @@ Rules for `optimized_words`:
 Rules for `groups`:
 - ALWAYS produce groups covering every input index exactly once.
 - Indices must be consecutive within a group and groups must appear in order.
+- EVERY group MUST include a non-empty `translation` string.
 - If you cannot group (input is empty), return `"groups": []`.
 """
 
@@ -81,6 +125,9 @@ class OptimizedWordModel(BaseModel):
 
 class WordGroupModel(BaseModel):
     word_indices: list[int]
+    # Natural English translation of the group. Empty string when source is
+    # already English or translation not requested.
+    translation: str = ""
 
 class RefineResponseModel(BaseModel):
     # Required fields with empty-list defaults. Gemini structured output is more
@@ -94,6 +141,7 @@ def _analyze_chunk(
     api_key: str,
     reference_text: Optional[str],
     index_offset: int,
+    model: str = "gemini-2.5-flash",
 ) -> dict:
     """Send a single chunk of words to Gemini. Indices in returned result are LOCAL to the chunk."""
     client = genai.Client(api_key=api_key)
@@ -122,7 +170,7 @@ def _analyze_chunk(
     prompt = "".join(prompt_parts)
 
     response = client.models.generate_content(
-        model="gemini-3-flash-preview",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=genai_types.GenerateContentConfig(
             system_instruction=_REFINE_SYSTEM_PROMPT,
@@ -184,6 +232,7 @@ def analyze_with_gemini(
     api_key: str,
     reference_text: Optional[str] = None,
     progress_cb: Optional[Callable[[str, str], None]] = None,
+    model: str = "gemini-2.5-flash",
 ) -> dict:
     """
     Send word-level transcript to Gemini for smart grouping and spell correction.
@@ -197,7 +246,7 @@ def analyze_with_gemini(
 
     # Short transcripts: single call.
     if len(words) <= 500:
-        return _analyze_chunk(words, api_key, reference_text, index_offset=0)
+        return _analyze_chunk(words, api_key, reference_text, index_offset=0, model=model)
 
     # Long transcripts: chunk + merge.
     chunks = _split_into_chunks(words)
@@ -206,7 +255,7 @@ def analyze_with_gemini(
         if progress_cb:
             progress_cb("analyze", f"Gemini chunk {ci + 1}/{len(chunks)} ({len(chunk_words)} words)…")
         ref = reference_text if ci == 0 else None
-        result = _analyze_chunk(chunk_words, api_key, ref, index_offset=start_idx)
+        result = _analyze_chunk(chunk_words, api_key, ref, index_offset=start_idx, model=model)
         for ow in result.get("optimized_words", []) or []:
             local = ow.get("index")
             if isinstance(local, int):
@@ -218,6 +267,7 @@ def analyze_with_gemini(
             indices = g.get("word_indices") or []
             merged["groups"].append({
                 "word_indices": [i + start_idx for i in indices if isinstance(i, int)],
+                "translation": (g.get("translation") or "").strip(),
             })
 
     return merged
@@ -245,7 +295,7 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
             indices = list(range(g["start_index"], g["end_index"] + 1))
         else:
             indices = g.get("word_indices", [])
-            
+
         valid = [i for i in indices if isinstance(i, int) and i in valid_words]
         if not valid:
             continue
@@ -258,6 +308,7 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
             seen.add(i)
         validated.append({
             "word_indices": valid,
+            "translation": (g.get("translation") or "").strip(),
         })
 
     # Check coverage — if <80% of kept words covered, reject
@@ -279,6 +330,7 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
             if not placed:
                 validated.append({
                     "word_indices": [idx],
+                    "translation": "",
                 })
 
     # Sort groups by first word index
@@ -288,6 +340,13 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
     final_groups = []
     for g in validated:
         inds = g["word_indices"]
+        # If we never split this group, the original translation stays attached.
+        # If we DO split, we keep the translation only on the FIRST piece because
+        # the original Gemini translation covered the full original group span;
+        # downstream splits do not have a per-piece translation, so we leave them
+        # blank rather than duplicate text incorrectly.
+        original_translation = g.get("translation", "")
+        is_first_piece = True
         current_chunk = []
         for idx in inds:
             # Check for large time gap before adding to current_chunk
@@ -295,18 +354,29 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
                 prev_idx = current_chunk[-1]
                 gap = words[idx]["start"] - words[prev_idx]["end"]
                 if gap >= 1.0:
-                    final_groups.append({"word_indices": current_chunk})
+                    final_groups.append({
+                        "word_indices": current_chunk,
+                        "translation": original_translation if is_first_piece else "",
+                    })
+                    is_first_piece = False
                     current_chunk = []
-                    
+
             current_chunk.append(idx)
             text = words[idx].get("text", "").strip()
             # If the chunk ends in punctuation (or is excessively long as a fallback safety limit)
             has_punct = any(text.endswith(p) for p in [".", "?", "!", ","])
             if has_punct or len(current_chunk) >= 12:
-                final_groups.append({"word_indices": current_chunk})
+                final_groups.append({
+                    "word_indices": current_chunk,
+                    "translation": original_translation if is_first_piece else "",
+                })
+                is_first_piece = False
                 current_chunk = []
         if current_chunk:
-            final_groups.append({"word_indices": current_chunk})
+            final_groups.append({
+                "word_indices": current_chunk,
+                "translation": original_translation if is_first_piece else "",
+            })
 
     # Cleanup pass: eliminate 1-word groups if there isn't a significant time gap
     merged_groups = []
@@ -392,6 +462,7 @@ def refine_video(
     output_dir: str,
     rendered_dir: str,
     gemini_api_key: str,
+    gemini_model: Optional[str] = None,
     req_filename: str = "",
     transcription_model: str = "large-v2",
     elevenlabs_api_key: Optional[str] = None,
@@ -424,15 +495,15 @@ def refine_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    log("init", f"Starting refine for: {video_path.name}")
+    log_step("init", f"Starting refine for: {video_path.name}")
 
     # ── Step 1: Transcribe ──────────────────────────────────
     if transcription_model == "scribe_v2":
-        log("transcribe", "Transcribing video with ElevenLabs Scribe v2…")
+        log_step("transcribe", "Transcribing video with ElevenLabs Scribe v2…")
     elif transcription_model == "flyfront/anime-whisper-faster":
-        log("transcribe", "Transcribing video with Anime-Whisper…")
+        log_step("transcribe", "Transcribing video with Anime-Whisper…")
     else:
-        log("transcribe", "Transcribing video with WhisperX…")
+        log_step("transcribe", "Transcribing video with WhisperX…")
 
     transcription = transcribe_video(
         str(video_path), 
@@ -445,7 +516,7 @@ def refine_video(
     words = transcription["words"]
     metadata = transcription["metadata"]
 
-    log(
+    log_step(
         "transcribe",
         f"Done — {len(words)} words in {metadata.get('processing_time_seconds', 0)}s",
     )
@@ -486,26 +557,32 @@ def refine_video(
 
     if yt_caps_path.exists():
         try:
-            log("analyze", f"Found reference captions: {yt_caps_path.name}")
+            log_step("analyze", f"Found reference captions: {yt_caps_path.name}")
             with open(yt_caps_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 segments = data.get("segments", [])
                 reference_text = " ".join(s.get("text", "") for s in segments)
         except Exception as e:
-            log("analyze", f"Warning: Failed to load reference captions: {e}")
+            log_step("analyze", f"Warning: Failed to load reference captions: {e}")
 
     # ── Step 4: Gemini analysis ─────────────────────────────
-    log("analyze", "Sending transcript to Gemini AI…")
+    log_step("analyze", "Sending transcript to Gemini AI…")
 
     if do_grouping:
-        analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text, progress_cb=progress_cb)
-        log("analyze", "Gemini analysis complete")
+        analysis = analyze_with_gemini(
+            adjusted_words,
+            gemini_api_key,
+            reference_text,
+            progress_cb=progress_cb,
+            model=(gemini_model or "gemini-2.5-flash"),
+        )
+        log_step("analyze", "Gemini analysis complete")
     else:
         analysis = {}
-        log("analyze", "Skipping Gemini analysis")
+        log_step("analyze", "Skipping Gemini analysis")
 
     # ── Step 4: Apply results ───────────────────────────────
-    log("apply", "Applying refinements…")
+    log_step("apply", "Applying refinements…")
 
     # 4a — Ensure default speakers
     for w in adjusted_words:
@@ -515,7 +592,7 @@ def refine_video(
     # 4a-bis — Optimized words (Hybrid mode using reference)
     optimized = analysis.get("optimized_words", [])
     if optimized:
-        log("apply", f"Applying Optimized Text from source B (Hybrid Mode) for {len(optimized)} words")
+        log_step("apply", f"Applying Optimized Text from source B (Hybrid Mode) for {len(optimized)} words")
         for item in optimized:
             idx = item.get("index")
             text = item.get("text")
@@ -536,10 +613,10 @@ def refine_video(
 
     if validated_groups and do_grouping:
         groups = validated_groups
-        log("apply", f"Using {len(groups)} Gemini-generated groups")
+        log_step("apply", f"Using {len(groups)} Gemini-generated groups")
     else:
         groups = _fallback_groups(adjusted_words, excluded_indices)
-        log("apply", f"Gemini groups invalid/skipped — using {len(groups)} auto-groups")
+        log_step("apply", f"Gemini groups invalid/skipped — using {len(groups)} auto-groups")
 
     # Attach timing to groups
     for g in groups:
@@ -550,13 +627,19 @@ def refine_video(
             g["end"] = gw[-1]["end"]
             if "speaker" not in g:
                 g["speaker"] = gw[0].get("speaker", "SPEAKER_00")
+        # Guarantee every group exposes a translation key. Fallback groups have
+        # none; Gemini-generated groups already do. Empty string is the
+        # contract for "no translation available" so the frontend never has to
+        # null-check.
+        if "translation" not in g:
+            g["translation"] = ""
 
     # 4f — Speakers info
     seen_speakers = {w.get("speaker", "SPEAKER_00") for w in adjusted_words}
     speakers = {spk: spk.replace("_", " ").title() for spk in seen_speakers}
 
     elapsed = round(time.time() - t0, 1)
-    log("done", f"Refine complete in {elapsed}s!")
+    log_step("done", f"Refine complete in {elapsed}s!")
 
     return {
         "video_filename": output_filename,
