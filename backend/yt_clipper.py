@@ -424,6 +424,84 @@ _HYPE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Rough currency → USD multipliers. Used only for relative weighting of superchats,
+# precision is irrelevant — a 5x off rate still ranks "$500 SC" above "$2 SC".
+_CURRENCY_TO_USD = {
+    "USD": 1.0, "$": 1.0, "US$": 1.0,
+    "JPY": 0.0067, "¥": 0.0067, "JP¥": 0.0067, "円": 0.0067,
+    "EUR": 1.08, "€": 1.08,
+    "GBP": 1.27, "£": 1.27,
+    "CAD": 0.74, "CA$": 0.74,
+    "AUD": 0.66, "A$": 0.66,
+    "NZD": 0.61, "NZ$": 0.61,
+    "KRW": 0.00075, "₩": 0.00075,
+    "TWD": 0.031, "NT$": 0.031,
+    "HKD": 0.13, "HK$": 0.13,
+    "INR": 0.012, "₹": 0.012,
+    "BRL": 0.20, "R$": 0.20,
+    "MXN": 0.060, "MX$": 0.060,
+    "IDR": 0.000064, "Rp": 0.000064,
+    "PHP": 0.018, "₱": 0.018,
+    "THB": 0.029, "฿": 0.029,
+    "VND": 0.000040, "₫": 0.000040,
+    "SGD": 0.74, "SG$": 0.74,
+    "MYR": 0.22, "RM": 0.22,
+    "PLN": 0.25, "zł": 0.25,
+    "RUB": 0.011, "₽": 0.011,
+    "CHF": 1.13,
+    "SEK": 0.094, "NOK": 0.090, "DKK": 0.14,
+    "TRY": 0.029, "ZAR": 0.054, "ARS": 0.0010,
+}
+_CURRENCY_RE = re.compile(
+    r"(US\$|CA\$|A\$|NZ\$|NT\$|HK\$|MX\$|JP¥|SG\$|R\$|RM|Rp|zł|"
+    r"USD|JPY|EUR|GBP|CAD|AUD|NZD|KRW|TWD|HKD|INR|BRL|MXN|IDR|PHP|"
+    r"THB|VND|SGD|MYR|PLN|RUB|CHF|SEK|NOK|DKK|TRY|ZAR|ARS|"
+    r"[\$€£¥₩₹₱฿₫₽]|円)"
+)
+
+
+def _parse_purchase_amount_to_usd(amount_text: str) -> float:
+    """
+    Convert YouTube purchaseAmountText (e.g. '$5.00', '¥500', 'PHP100.00') to
+    approximate USD. Returns 0.0 if unparseable.
+    """
+    if not amount_text:
+        return 0.0
+    m = _CURRENCY_RE.search(amount_text)
+    rate = _CURRENCY_TO_USD.get(m.group(1), 0.0) if m else 0.0
+    if rate == 0.0:
+        return 0.0
+    # Strip non-numeric except dot/comma, normalize comma → dot if it's decimal
+    num_str = re.sub(r"[^0-9.,]", "", amount_text)
+    if not num_str:
+        return 0.0
+    # If both . and , present, assume , is thousands sep
+    if "." in num_str and "," in num_str:
+        num_str = num_str.replace(",", "")
+    elif "," in num_str and "." not in num_str:
+        # Locale where comma is decimal sep (e.g. EU)
+        num_str = num_str.replace(",", ".")
+    try:
+        return float(num_str) * rate
+    except ValueError:
+        return 0.0
+
+
+def _runs_to_text(runs: list) -> str:
+    """Flatten a YouTube chat 'runs' array (text + emoji) to plain text."""
+    parts = []
+    for r in runs or []:
+        if "text" in r:
+            parts.append(r["text"])
+        elif "emoji" in r:
+            emoji = r["emoji"]
+            shortcuts = emoji.get("shortcuts") or []
+            if shortcuts:
+                parts.append(shortcuts[0])
+            elif emoji.get("emojiId"):
+                parts.append(emoji["emojiId"])
+    return " ".join(parts).strip()
+
 
 def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
     """
@@ -503,27 +581,67 @@ def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
 
                 for act in actions:
                     item = act.get("addChatItemAction", {}).get("item", {})
-                    renderer = (
-                        item.get("liveChatTextMessageRenderer")
-                        or item.get("liveChatPaidMessageRenderer")
-                        or {}
+
+                    # Detect renderer type → kind + paid amount
+                    text_renderer = item.get("liveChatTextMessageRenderer")
+                    paid_msg     = item.get("liveChatPaidMessageRenderer")
+                    paid_sticker = item.get("liveChatPaidStickerRenderer")
+                    member       = (item.get("liveChatMembershipItemRenderer")
+                                    or item.get("liveChatSponsorshipsGiftPurchaseAnnouncementRenderer"))
+
+                    renderer = text_renderer or paid_msg or paid_sticker or member
+                    if not renderer:
+                        continue
+
+                    # Extract message text (best-effort across renderer types)
+                    if paid_sticker:
+                        # Sticker has no message body; synthesize a marker
+                        text = "[STICKER]"
+                    elif member:
+                        # Member-join / gift announcement: use header subtext if present
+                        header_runs = (
+                            renderer.get("headerSubtext", {}).get("runs")
+                            or renderer.get("primaryText", {}).get("runs")
+                            or renderer.get("message", {}).get("runs")
+                            or []
+                        )
+                        text = _runs_to_text(header_runs) or "[MEMBER]"
+                    else:
+                        text = _runs_to_text(renderer.get("message", {}).get("runs", []))
+
+                    if not text:
+                        continue
+
+                    # Author channel id (for unique-author counting)
+                    author_id = (
+                        renderer.get("authorExternalChannelId")
+                        or renderer.get("authorName", {}).get("simpleText")
+                        or ""
                     )
-                    msg = renderer.get("message", {})
-                    runs = msg.get("runs", [])
-                    parts = []
-                    for r in runs:
-                        if "text" in r:
-                            parts.append(r["text"])
-                        elif "emoji" in r:
-                            emoji = r["emoji"]
-                            shortcuts = emoji.get("shortcuts") or []
-                            if shortcuts:
-                                parts.append(shortcuts[0])
-                            elif emoji.get("emojiId"):
-                                parts.append(emoji["emojiId"])
-                    text = " ".join(parts).strip()
-                    if text:
-                        msgs.append({"t": t, "text": text})
+
+                    # Paid amount → USD (0.0 for free messages)
+                    amt_text = ""
+                    if paid_msg or paid_sticker:
+                        amt_text = (renderer.get("purchaseAmountText", {}) or {}).get("simpleText", "")
+                    paid_usd = _parse_purchase_amount_to_usd(amt_text) if amt_text else 0.0
+
+                    # Classify kind
+                    if paid_msg:
+                        kind = "superchat"
+                    elif paid_sticker:
+                        kind = "supersticker"
+                    elif member:
+                        kind = "member"
+                    else:
+                        kind = "msg"
+
+                    msgs.append({
+                        "t": t,
+                        "text": text,
+                        "author": author_id,
+                        "kind": kind,
+                        "paid_usd": paid_usd,
+                    })
     except Exception as e:
         log.warning("Chat replay fetch failed (non-fatal): %s", e)
         return []
@@ -534,28 +652,89 @@ def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
 
 def bucket_chat(chat_msgs: list[dict], video_duration: float, bucket_size: float = 15.0) -> list[dict]:
     """
-    Aggregate chat into fixed-size time buckets.
-    Returns [{t_start, msgs, laugh, hype, score, top_emotes:[(token,count)...]}, ...]
+    Aggregate chat into fixed-size time buckets with multi-signal scoring.
+
+    Signals captured per bucket:
+      - msgs:          total chat messages
+      - unique_authors: distinct chatter count (breadth, not just spam)
+      - laugh / hype:  regex hits on laugh + hype tokens
+      - sc_count:      superchat count
+      - sc_usd:        sum of superchat USD value (currency-converted)
+      - members:       new memberships / gifted memberships
+      - stickers:      paid super-stickers
+      - emote_wall:    True if ≥70% of msgs are pure-emote/reaction tokens
+      - top_emotes:    [(token, count), …]
+
+    Score formula (relative weights tuned for "moments people care about"):
+        msgs * 1.0
+      + unique_authors * 1.5     (diversity beats spam)
+      + laugh   * 2.0
+      + hype    * 1.5
+      + sc_count * 5.0           (any SC = strong vote)
+      + sc_usd   * 0.5           (extra weight for big SCs)
+      + members * 8.0            (rare, high signal)
+      + stickers * 3.0
+      + (emote_wall ? msgs * 0.5 : 0)
     """
     if not chat_msgs or video_duration <= 0:
         return []
 
     n = int(video_duration // bucket_size) + 1
-    buckets = [{"t_start": i * bucket_size, "msgs": 0, "laugh": 0, "hype": 0, "tokens": {}}
-               for i in range(n)]
+    buckets = [
+        {
+            "t_start": i * bucket_size,
+            "msgs": 0,
+            "authors": set(),
+            "laugh": 0,
+            "hype": 0,
+            "sc_count": 0,
+            "sc_usd": 0.0,
+            "members": 0,
+            "stickers": 0,
+            "emote_msgs": 0,
+            "tokens": {},
+        }
+        for i in range(n)
+    ]
 
     for m in chat_msgs:
         idx = int(m["t"] // bucket_size)
         if idx < 0 or idx >= n:
             continue
         b = buckets[idx]
-        b["msgs"] += 1
+        kind = m.get("kind", "msg")
         text = m["text"]
+
+        b["msgs"] += 1
+        if m.get("author"):
+            b["authors"].add(m["author"])
+
         if _LAUGH_RE.search(text):
             b["laugh"] += 1
         if _HYPE_RE.search(text):
             b["hype"] += 1
-        # Track repeated all-caps tokens / emote-like words for top_emotes
+
+        if kind == "superchat":
+            b["sc_count"] += 1
+            b["sc_usd"] += float(m.get("paid_usd") or 0.0)
+        elif kind == "supersticker":
+            b["stickers"] += 1
+            b["sc_usd"] += float(m.get("paid_usd") or 0.0)
+        elif kind == "member":
+            b["members"] += 1
+
+        # Emote-wall detection: msg is mostly emoji / single short reaction token
+        # Heuristic: short msgs (≤6 chars) OR pure emoji-shortcut (starts with ':' or non-ascii letter)
+        stripped = text.strip()
+        is_emote_msg = (
+            len(stripped) <= 6
+            or _LAUGH_RE.fullmatch(stripped) is not None
+            or _HYPE_RE.fullmatch(stripped) is not None
+            or all(not ch.isascii() or not ch.isalnum() for ch in stripped)
+        )
+        if is_emote_msg:
+            b["emote_msgs"] += 1
+
         for tok in text.split():
             if 2 <= len(tok) <= 24 and (tok.isupper() or tok.endswith("LUL") or tok.endswith("KEKW")):
                 b["tokens"][tok] = b["tokens"].get(tok, 0) + 1
@@ -564,24 +743,101 @@ def bucket_chat(chat_msgs: list[dict], video_duration: float, bucket_size: float
     for b in buckets:
         if b["msgs"] == 0:
             continue
-        score = b["msgs"] + 2.0 * b["laugh"] + 1.5 * b["hype"]
+        unique_authors = len(b["authors"])
+        emote_wall = b["msgs"] >= 5 and (b["emote_msgs"] / b["msgs"]) >= 0.70
+
+        score = (
+            b["msgs"] * 1.0
+            + unique_authors * 1.5
+            + b["laugh"] * 2.0
+            + b["hype"] * 1.5
+            + b["sc_count"] * 5.0
+            + b["sc_usd"] * 0.5
+            + b["members"] * 8.0
+            + b["stickers"] * 3.0
+            + (b["msgs"] * 0.5 if emote_wall else 0.0)
+        )
+
         top_emotes = sorted(b["tokens"].items(), key=lambda kv: -kv[1])[:3]
         out.append({
             "t_start": b["t_start"],
             "msgs": b["msgs"],
+            "unique_authors": unique_authors,
             "laugh": b["laugh"],
             "hype": b["hype"],
+            "sc_count": b["sc_count"],
+            "sc_usd": round(b["sc_usd"], 2),
+            "members": b["members"],
+            "stickers": b["stickers"],
+            "emote_wall": emote_wall,
             "score": round(score, 1),
             "top_emotes": top_emotes,
         })
     return out
 
 
+def annotate_baseline_signals(buckets: list[dict], window_buckets: int = 20) -> list[dict]:
+    """
+    Add rolling-baseline signals to each bucket (in-place + returned):
+      - z_score: how many std-devs above local mean (rolling window of N buckets)
+      - delta:   score - prev_bucket.score  (sudden reaction detection)
+      - spike:   True if z_score >= 1.5 OR delta >= local_mean (whichever fires first)
+
+    Why this matters:
+      - Quiet stream where one bucket has msgs=15 vs busy stream where msgs=15 is
+        baseline → only the first should be flagged. Absolute p80 misses this.
+      - Sudden delta catches reaction-to-event moments even if absolute count
+        isn't peak (e.g. shocked silence after big reveal still has a spike edge).
+
+    window_buckets=20 at 15s/bucket = 5min rolling window. Good for both
+    short streams (uses smaller effective window at edges) and long ones.
+    """
+    if not buckets:
+        return buckets
+
+    scores = [b["score"] for b in buckets]
+    n = len(scores)
+    half = max(1, window_buckets // 2)
+
+    prev_score = 0.0
+    for i, b in enumerate(buckets):
+        lo = max(0, i - half)
+        hi = min(n, i + half + 1)
+        # Exclude self from baseline so spike doesn't dilute its own signal
+        window = [scores[j] for j in range(lo, hi) if j != i]
+        if window:
+            mean = sum(window) / len(window)
+            var = sum((x - mean) ** 2 for x in window) / len(window)
+            std = var ** 0.5
+        else:
+            mean = 0.0
+            std = 0.0
+
+        z = (b["score"] - mean) / std if std > 1e-6 else 0.0
+        delta = b["score"] - prev_score
+        spike = (z >= 1.5) or (delta >= mean and mean > 0 and b["score"] > mean * 1.5)
+
+        b["z_score"] = round(z, 2)
+        b["delta"] = round(delta, 1)
+        b["local_mean"] = round(mean, 1)
+        b["spike"] = bool(spike)
+
+        prev_score = b["score"]
+
+    return buckets
+
+
 def format_chat_timeline(buckets: list[dict], min_msgs: int = 2) -> str:
     """
     Compact, token-cheap timeline for Gemini.
     Skips empty / sub-threshold buckets to keep prompt small.
-    Marks high-percentile buckets with HYPE.
+    Surfaces multi-signal cues:
+      - HYPE     : score in top 20% globally (absolute spike)
+      - SPIKE    : rolling-baseline z-score / delta spike (relative spike)
+      - SC=$X.X  : superchat USD total in this bucket
+      - MEM=N    : N new memberships
+      - WALL     : emote-wall (chat is mostly reactions, not dialogue)
+      - u=N      : unique authors (breadth)
     """
     if not buckets:
         return ""
@@ -601,16 +857,26 @@ def format_chat_timeline(buckets: list[dict], min_msgs: int = 2) -> str:
         ss = t % 60
         ts = f"{hh:02d}:{mm:02d}:{ss:02d}" if hh > 0 else f"{mm:02d}:{ss:02d}"
 
-        parts = [f"msgs={b['msgs']}"]
+        parts = [f"msgs={b['msgs']}", f"u={b.get('unique_authors', 0)}"]
         if b["laugh"]:
             parts.append(f"laugh={b['laugh']}")
         if b["hype"]:
             parts.append(f"hype={b['hype']}")
+        if b.get("sc_count"):
+            parts.append(f"SC={b['sc_count']}x${b['sc_usd']:.0f}")
+        if b.get("members"):
+            parts.append(f"MEM={b['members']}")
+        if b.get("stickers"):
+            parts.append(f"stk={b['stickers']}")
+        if b.get("emote_wall"):
+            parts.append("WALL")
         if b["top_emotes"]:
             emotes_str = ",".join(f"{tok}x{cnt}" for tok, cnt in b["top_emotes"])
             parts.append(f"({emotes_str})")
         if b["score"] >= p80:
             parts.append("HYPE")
+        if b.get("spike"):
+            parts.append(f"SPIKE(z={b.get('z_score', 0):.1f})")
         lines.append(f"[{ts}] " + " ".join(parts))
 
     return "\n".join(lines)
@@ -702,12 +968,37 @@ Opening-song warning:
   song or before the first spoken line.
 
 Live chat hype signal (when provided):
-- A separate timeline shows live-chat activity in 15s buckets with msgs/laugh/hype counts.
-- Buckets marked HYPE are top-percentile activity spikes.
-- High laugh counts strongly suggest a funny moment worth clipping.
-- Use chat spikes to CONFIRM clip-worthy transcript moments. Prefer moments where both
-  the transcript content AND chat hype peak together. Do NOT clip purely on chat spikes
-  if the transcript at that point is silent or just opening-song lyrics.
+- A separate timeline shows live-chat activity in 15s buckets. Each bucket lists:
+    msgs=N      total chat messages
+    u=N         unique authors (breadth — 50 different people > 5 spammers)
+    laugh=N     laugh-token hits (lol/lmao/草/笑/🤣)
+    hype=N      hype-token hits (pog/sheesh/🔥/やばい)
+    SC=NxUSD    superchats: count and total USD value (real money on the line)
+    MEM=N      new channel memberships (rare — strong "I love this" signal)
+    stk=N       paid super-stickers
+    WALL        emote-wall: chat is mostly short reactions, not dialogue
+    HYPE        absolute top-20% spike across the whole stream
+    SPIKE       relative spike vs local 5-min baseline (z-score ≥ 1.5)
+
+Signal priority (highest to lowest):
+  1. Superchats (SC=) and memberships (MEM=) — paid signal almost never lies
+  2. SPIKE+HYPE together — both absolute and relative peak
+  3. SPIKE alone in a quiet stream — viewers reacting to something specific
+  4. WALL with high u= — many distinct people emoting at once = viral moment
+  5. High laugh count — funny moments are very clippable
+  6. Plain HYPE without SPIKE/u= — likely sustained vibe, may or may not be a moment
+
+How to use:
+- Use chat signals to CONFIRM clip-worthy transcript moments. Prefer moments where
+  both transcript content AND chat signals peak together.
+- Do NOT clip on chat spikes alone if the transcript at that point is silent or
+  is just opening-song lyrics. The chat is the audience reaction; the transcript
+  is the actual content.
+- A WALL bucket near transcript dialogue is a stronger signal than a HYPE bucket
+  with no WALL — it means viewers were reacting, not just chatting.
+- When SC/MEM appear, the moment that triggered them is usually 5–30s BEFORE the
+  payment posts (people watch, then pay). Walk backward in the transcript to find
+  what caused it.
 
 Timestamps:
 - IMPORTANT: start and end values MUST be plain decimal numbers representing SECONDS

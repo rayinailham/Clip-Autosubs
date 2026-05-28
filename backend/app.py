@@ -35,7 +35,7 @@ from reframe_renderer import (
     render_shorts_blur_bg,
     render_shorts_black_bg,
 )
-from subtitle_generator import generate_ass, save_ass
+from subtitle_generator import generate_ass, save_ass, generate_srt
 from transcribe import transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
 from refine import refine_video
@@ -709,6 +709,70 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
     return result
 
 
+class ExportSrtRequest(BaseModel):
+    """Request body for /export-srt — Premiere Pro compatible plain SRT."""
+    video_filename: str
+    words: list[WordItem]
+    word_groups: Optional[list[WordGroup]] = None
+    words_per_group: int = 4
+    use_custom_groups: bool = False
+    uppercase: bool = False
+    active_segments: Optional[list[list[float]]] = None  # remap timing if cut
+
+
+@app.post("/export-srt")
+async def export_srt_endpoint(req: ExportSrtRequest):
+    """
+    Build a plain SRT file (group/sentence-level cues) for Premiere Pro.
+
+    SRT carries only timing + text — styling is applied inside Premiere's
+    Captions panel after import. Animations, glow, scale, per-word
+    highlight, and custom positioning are not portable to SRT.
+    """
+    words_dicts = [w.model_dump() for w in req.words]
+    groups_dicts: Optional[list[dict]] = None
+    if req.word_groups and req.use_custom_groups:
+        groups_dicts = [g.model_dump() for g in req.word_groups]
+
+    # Apply timeline cuts (active_segments) so cue times match the cut video.
+    if req.active_segments:
+        segs = [(float(s[0]), float(s[1])) for s in req.active_segments]
+        words_dicts = _remap_words_for_segments(words_dicts, segs)
+        if groups_dicts:
+            for g in groups_dicts:
+                g["start"] = _remap_time(g["start"], segs)
+                g["end"] = _remap_time(g["end"], segs)
+
+    if not words_dicts:
+        raise HTTPException(status_code=400, detail="No words to export.")
+
+    content = generate_srt(
+        words=words_dicts,
+        words_per_group=req.words_per_group,
+        custom_groups=groups_dicts,
+        use_custom_groups=req.use_custom_groups and bool(groups_dicts),
+        uppercase=req.uppercase,
+    )
+
+    if not content.strip():
+        raise HTTPException(status_code=500, detail="SRT generation produced empty output.")
+
+    stem = Path(req.video_filename).stem or "subtitles"
+    srt_filename = f"{stem}.srt"
+    srt_path = OUTPUT_DIR / srt_filename
+    srt_path.parent.mkdir(parents=True, exist_ok=True)
+    # UTF-8 with BOM — Premiere Pro reads non-ASCII reliably this way.
+    with open(srt_path, "w", encoding="utf-8-sig") as f:
+        f.write(content)
+
+    return {
+        "status": "ok",
+        "filename": srt_filename,
+        "url": f"/outputs/{srt_filename}",
+        "size_bytes": srt_path.stat().st_size,
+    }
+
+
 @app.post("/save-style")
 async def save_style_endpoint(payload: SaveStyleRequest):
     """Save style settings for a video file."""
@@ -1072,7 +1136,7 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                 "elapsed": _elapsed(),
             }
             try:
-                from yt_clipper import fetch_chat_replay, bucket_chat
+                from yt_clipper import fetch_chat_replay, bucket_chat, annotate_baseline_signals
 
                 def _chat_progress(stage: str, info: dict):
                     if stage == "starting":
@@ -1114,6 +1178,8 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                         transcript_data["video_duration"],
                         bucket_size=15.0,
                     )
+                    if chat_buckets:
+                        chat_buckets = annotate_baseline_signals(chat_buckets)
             except Exception as chat_err:
                 log.warning("yt-analyze %s — chat signal skipped: %s", job_id, chat_err)
                 chat_buckets = None
