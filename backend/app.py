@@ -162,13 +162,6 @@ class TranscribeExistingRequest(BaseModel):
     max_speakers: Optional[int] = None   # Max speakers (hint)
 
 
-class CutSilenceRequest(BaseModel):
-    video_filename: str
-    words: list[WordItem]                # word-level timestamps from transcription
-    min_silence_ms: int = 500           # gaps >= this (ms) are removed
-    padding_ms: int = 100               # context kept around each speech block (ms)
-
-
 class SaveStyleRequest(BaseModel):
     video_filename: str
     style: StyleConfig

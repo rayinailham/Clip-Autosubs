@@ -177,3 +177,81 @@ def render_video(
     size_mb = output_path.stat().st_size / (1024 * 1024)
     print(f"[renderer] Done! Output: {output_path} ({size_mb:.1f} MB)")
     return str(output_path)
+
+
+def _has_audio_stream(video_path: str) -> bool:
+    """Return True if the file contains at least one audio stream."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "a",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(video_path)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10,
+        )
+        return bool(result.stdout.strip())
+    except Exception:
+        return True
+
+
+def cut_video_segments(
+    video_path: str,
+    segments: list,
+    output_path: str,
+    progress_cb=None,
+) -> None:
+    """Cut video to only the given (start, end) segments using FFmpeg trim+concat."""
+    import os, tempfile
+
+    def log(msg: str):
+        if progress_cb:
+            progress_cb(msg)
+        else:
+            print(f"[cut_segments] {msg}")
+
+    vp = Path(video_path).resolve()
+    op = Path(output_path).resolve()
+    op.parent.mkdir(parents=True, exist_ok=True)
+
+    has_audio = _has_audio_stream(str(vp))
+    filter_parts, stream_labels = [], []
+
+    for i, (start, end) in enumerate(segments):
+        filter_parts.append(f"[0:v]trim=start={start:.4f}:end={end:.4f},setpts=PTS-STARTPTS[v{i}]")
+        if has_audio:
+            filter_parts.append(f"[0:a]atrim=start={start:.4f}:end={end:.4f},asetpts=PTS-STARTPTS[a{i}]")
+            stream_labels.append(f"[v{i}][a{i}]")
+        else:
+            stream_labels.append(f"[v{i}]")
+
+    n = len(segments)
+    concat = "".join(stream_labels)
+    if has_audio:
+        filter_parts.append(f"{concat}concat=n={n}:v=1:a=1[outv][outa]")
+    else:
+        filter_parts.append(f"{concat}concat=n={n}:v=1:a=0[outv]")
+
+    filter_script = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            filter_script = f.name
+            f.write(";\n".join(filter_parts))
+
+        cmd = ["ffmpeg", "-y", "-i", str(vp), "-filter_complex_script", filter_script, "-map", "[outv]"]
+        if has_audio:
+            cmd.extend(["-map", "[outa]"])
+        cmd.extend(["-c:v", "libx264", "-crf", "18", "-preset", "fast"])
+        if has_audio:
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        cmd.extend(["-movflags", "+faststart", str(op)])
+
+        log(f"Cutting {n} segments…")
+        result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg cut failed (code {result.returncode}):\n{result.stderr[-1200:]}")
+        if not op.exists():
+            raise RuntimeError("FFmpeg exited 0 but output file was not created.")
+    finally:
+        if filter_script and os.path.exists(filter_script):
+            try:
+                os.unlink(filter_script)
+            except OSError:
+                pass

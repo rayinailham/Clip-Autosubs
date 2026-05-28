@@ -21,11 +21,7 @@ export default {
       store.appMode = 'refine';
     }
 
-    function goSilenceCutOnly() {
-      store.appMode = 'silencecut';
-    }
-
-    return { goSubtitle, goVtuber, goYtClipper, goRefine, goSilenceCutOnly };
+    return { goSubtitle, goVtuber, goYtClipper, goRefine };
   },
   template: `
     <div class="home-view">
@@ -42,12 +38,11 @@ export default {
           <h2 class="home-card-title">Auto-Refine</h2>
           <p class="home-card-desc">
             Drop a vertical video and let AI handle everything: transcribe,
-            identify speakers, remove silences and smart-group your subtitles — all in one click.
+            identify speakers, and smart-group your subtitles — all in one click.
           </p>
           <div class="home-card-tags">
             <span class="tag">Speaker ID</span>
             <span class="tag">Smart groups</span>
-            <span class="tag">Silence cut</span>
             <span class="tag">Gemini AI</span>
           </div>
           <button class="btn btn-refine home-card-btn">Get Started →</button>
@@ -101,20 +96,6 @@ export default {
             <span class="tag">Auto-clip</span>
           </div>
           <button class="btn btn-yt home-card-btn">Get Started →</button>
-        </div>
-
-        <!-- Fast Silence Cut card -->
-        <div class="home-card" @click="goSilenceCutOnly" style="background: var(--surface2);">
-          <div class="home-card-icon">✂️</div>
-          <h2 class="home-card-title">Fast Silence Cut</h2>
-          <p class="home-card-desc">
-            Just want to remove silence from your video? Upload your file and let AI cut the gaps instantly without adding subtitles.
-          </p>
-          <div class="home-card-tags">
-            <span class="tag">No Subtitles</span>
-            <span class="tag">Fast Cut</span>
-          </div>
-          <button class="btn btn-outline home-card-btn">Get Started →</button>
         </div>
 
       </div>

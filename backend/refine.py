@@ -14,7 +14,6 @@ Orchestrates:
 import json
 import re
 import time
-import uuid
 from pathlib import Path
 from typing import Optional, Callable
 
@@ -29,7 +28,6 @@ except ImportError:
     GEMINI_AVAILABLE = False
 
 from transcribe import transcribe_video
-from silence_cutter import detect_speech_segments, clamp_segments, cut_silence
 from renderer import get_video_info
 
 
@@ -361,9 +359,6 @@ def refine_video(
     req_filename: str = "",
     transcription_model: str = "large-v2",
     elevenlabs_api_key: Optional[str] = None,
-    min_silence_ms: int = 500,
-    padding_ms: int = 100,
-    do_cut_silence: bool = True,
     do_grouping: bool = True,
     progress_cb: Optional[Callable[[str, str], None]] = None,
 ) -> dict:
@@ -375,13 +370,11 @@ def refine_video(
         output_dir:      Directory for transcription JSON.
         rendered_dir:    Directory for rendered / cut videos.
         gemini_api_key:  Google Gemini API key.
-        min_silence_ms:  Minimum silence gap to cut (ms).
-        padding_ms:      Padding around speech blocks (ms).
         progress_cb:     Callback(step, message) for progress updates.
 
     Returns:
         dict with video_filename, words (with speakers), groups,
-        speakers, hidden_indices, silence_stats, metadata.
+        speakers, metadata.
     """
     def log(step: str, msg: str):
         print(f"[refine:{step}] {msg}")
@@ -420,45 +413,9 @@ def refine_video(
     if not words:
         raise ValueError("Transcription produced no words.")
 
-    # ── Step 2: Cut silences ────────────────────────────────
-    log("silence", "Cutting silences from video…")
-
-    job_id = uuid.uuid4().hex[:8]
-    output_filename = f"{video_path.stem}_refined_{job_id}.mp4"
-    output_path = Path(rendered_dir) / output_filename
-
-    if do_cut_silence:
-        stats = cut_silence(
-            video_path=str(video_path),
-            words=words,
-            output_path=str(output_path),
-            min_silence_ms=min_silence_ms,
-            padding_ms=padding_ms,
-            progress_cb=lambda msg: log("silence", msg),
-        )
-
-        # Adjust timestamps to match the silence-cut output
-        kept_segments = [(s[0], s[1]) for s in stats["segments"]]
-        adjusted_words = adjust_timestamps(words, kept_segments)
-
-        log(
-            "silence",
-            f"Done — {stats['removed_duration_s']}s removed, "
-            f"{len(adjusted_words)} words remain",
-        )
-    else:
-        log("silence", "Skipping silence cutting")
-        output_filename = req_filename if req_filename else video_path.name
-        adjusted_words = words
-        duration = metadata.get("duration", 0)
-        if not duration and words:
-            duration = words[-1]["end"]
-        stats = {
-            "original_duration_s": duration,
-            "kept_duration_s": duration,
-            "removed_duration_s": 0,
-            "segments_kept": 1,
-        }
+    # ── Step 2: Use original video (silence cut removed) ────
+    output_filename = req_filename if req_filename else video_path.name
+    adjusted_words = words
 
     # ── Step 3: Check for reference captions (Optional) ──────
     reference_text = None
@@ -568,11 +525,5 @@ def refine_video(
         "groups": groups,
         "speakers": speakers,
         "metadata": metadata,
-        "silence_stats": {
-            "original_duration_s": stats["original_duration_s"],
-            "kept_duration_s": stats["kept_duration_s"],
-            "removed_duration_s": stats["removed_duration_s"],
-            "segments_kept": stats["segments_kept"],
-        },
         "processing_time_s": elapsed,
     }
