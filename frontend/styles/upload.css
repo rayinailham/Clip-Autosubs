@@ -16,14 +16,12 @@
 }
 
 .upload-hero h2 {
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #a78bfa 0%, var(--accent2) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 0.4rem;
+  font-size: 2.6rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--text);
+  margin-bottom: 0.75rem;
 }
 
 .upload-hero p {
@@ -31,47 +29,36 @@
   font-size: 0.9rem;
 }
 
-/* ── Animated Card Border ────────────────────── */
+/* ── Card frame (animated rainbow border removed) ───────── */
 .upload-card-wrap {
   position: relative;
   max-width: 560px;
   width: 100%;
-  border-radius: calc(var(--radius) + 2px);
-  padding: 2px;
-  background: linear-gradient(135deg, rgba(124, 92, 252, 0.5), rgba(0, 212, 255, 0.3), rgba(124, 92, 252, 0.5));
-  background-size: 300% 300%;
-  animation: borderShift 6s ease infinite, fadeUp 0.5s ease both 0.1s;
+  border-radius: var(--radius);
+  padding: 0;
+  background: transparent;
+  animation: fadeUp 0.5s ease both 0.1s;
 }
 
-@keyframes borderShift {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
-  }
-}
+@keyframes borderShift { 0%, 100% { background-position: 0 0; } }
 
 /* ── Upload Card ─────────────────────────────── */
 .upload-card {
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 3.5rem 3rem;
+  padding: 4rem 3rem;
   text-align: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: border-color 0.2s, background 0.2s;
   width: 100%;
   position: relative;
 }
 
 .upload-card:hover,
 .upload-card.dragover {
-  background: rgba(124, 92, 252, 0.07);
+  border-color: var(--accent);
+  background: var(--surface2);
 }
 
 .upload-card.disabled {
@@ -87,23 +74,11 @@
 }
 
 .upload-icon {
-  font-size: 3.8rem;
-  margin-bottom: 1.2rem;
+  font-size: 2.4rem;
+  margin-bottom: 1.25rem;
   display: block;
-  filter: drop-shadow(0 0 16px rgba(124, 92, 252, 0.5));
-  animation: floatIcon 3s ease-in-out infinite;
-}
-
-@keyframes floatIcon {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-5px);
-  }
+  color: var(--text-dim);
+  line-height: 1;
 }
 
 .upload-card h2 {
@@ -154,7 +129,7 @@
 .progress-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--success));
+  background: var(--accent);
   width: 30%;
   animation: indeterminate 1.5s infinite ease-in-out;
 }
@@ -240,9 +215,8 @@
 }
 
 .upload-item:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
-  border-color: rgba(124, 92, 252, 0.45);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
 /* ── Thumbnail (16:9) ────────────────────────── */
@@ -307,9 +281,9 @@
 }
 
 .upload-badge.transcribed {
-  border-color: rgba(0, 229, 204, 0.4);
+  border-color: rgba(74,222,128,0.35);
   color: var(--success);
-  background: rgba(0, 229, 204, 0.06);
+  background: rgba(74,222,128,0.08);
 }
 
 /* ── Card action row ─────────────────────────── */

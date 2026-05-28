@@ -5,12 +5,12 @@
   padding: 0 24px;
 }
 .refine-view h1 {
-  font-size: 2rem;
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
   margin-bottom: 8px;
-  background: linear-gradient(135deg, #f7b733, #fc4a1a);
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--text);
 }
 .refine-view .refine-subtitle {
   color: var(--text-dim);
@@ -45,9 +45,8 @@
 }
 .refine-input:focus,
 .refine-select:focus {
-  border-color: #f7b733;
+  border-color: var(--accent);
   outline: none;
-  box-shadow: 0 0 0 2px rgba(247, 183, 51, 0.15);
 }
 .refine-select option {
   background: var(--surface);
@@ -63,8 +62,8 @@
   color: var(--text-dim);
 }
 .refine-upload-area:hover {
-  border-color: #f7b733;
-  background: rgba(247, 183, 51, 0.05);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 .refine-upload-area input[type="file"] { display: none; }
 .refine-upload-icon { font-size: 2rem; margin-bottom: 6px; }
@@ -74,8 +73,9 @@
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: rgba(247, 183, 51, 0.08);
-  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   font-size: 0.88rem;
 }
 .refine-file-info .file-icon { font-size: 1.2rem; }
@@ -134,7 +134,7 @@
 }
 .refine-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #f7b733, #fc4a1a);
+  background: var(--accent);
   border-radius: 4px;
   transition: width 0.4s ease;
 }
@@ -154,8 +154,8 @@
   color: var(--text-dim);
   transition: color 0.3s;
 }
-.refine-step.active { color: #f7b733; font-weight: 600; }
-.refine-step.done { color: #4caf50; }
+.refine-step.active { color: var(--accent); font-weight: 600; }
+.refine-step.done { color: var(--success); }
 .refine-step-icon { font-size: 1.1rem; width: 22px; text-align: center; }
 .refine-step-label { flex: 1; }
 
@@ -165,7 +165,7 @@
   padding: 60px 0;
 }
 .refine-done-icon { font-size: 3rem; margin-bottom: 12px; }
-.refine-done h2 { font-size: 1.4rem; color: #4caf50; }
+.refine-done h2 { font-size: 1.4rem; color: var(--success); }
 .refine-done p { color: var(--text-dim); margin-top: 8px; }
 
 /* ── Error state ────────────────────────────── */
@@ -174,7 +174,7 @@
   padding: 40px 0;
 }
 .refine-error-icon { font-size: 3rem; margin-bottom: 12px; }
-.refine-error h2 { font-size: 1.4rem; color: #f44336; }
+.refine-error h2 { font-size: 1.4rem; color: var(--error); }
 .refine-error p {
   color: var(--text-dim);
   margin-top: 8px;
@@ -192,23 +192,18 @@
 
 /* ── Refine button ──────────────────────────── */
 .btn-refine {
-  background: linear-gradient(135deg, #f7b733, #fc4a1a) !important;
-  color: #fff !important;
+  background: var(--accent) !important;
+  color: var(--accent-fg) !important;
   border: none !important;
   font-weight: 600;
 }
-.btn-refine:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 4px 20px rgba(252, 74, 26, 0.3);
-}
+.btn-refine:hover { background: var(--accent-hover) !important; }
 
 /* ── Home card refine variant ───────────────── */
-.home-card--refine::before {
-  background: linear-gradient(135deg, rgba(247,183,51,0.12), rgba(252,74,26,0.08));
-}
+.home-card--refine::before { content: none; }
 .home-card--refine:hover {
-  border-color: rgba(247, 183, 51, 0.35);
-  box-shadow: 0 8px 32px rgba(247, 183, 51, 0.1);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
 /* ── Speaker dividers in transcript ─────────── */
@@ -262,7 +257,7 @@
   position: absolute;
   top: -2px;
   height: 4px;
-  background: linear-gradient(90deg, #f7b733, #fc4a1a);
+  background: var(--accent);
   border-radius: 2px;
   z-index: 8;
   pointer-events: auto;
@@ -275,7 +270,7 @@
   transform: translateX(-50%);
   font-size: 0.6rem;
   font-weight: 700;
-  color: #f7b733;
+  color: var(--accent);
   white-space: nowrap;
   letter-spacing: 0.04em;
 }

@@ -318,19 +318,19 @@ export default {
       <template v-if="step === 'setup'">
         <!-- Hero -->
         <div class="upload-hero">
-          <h2 style="background: linear-gradient(135deg, #f7b733 0%, #fc4a1a 100%); -webkit-background-clip: text; color: transparent;">✨ Auto-Refine</h2>
+          <h2 style="font-weight:600; letter-spacing:-0.02em;">Auto-Refine</h2>
           <p>Upload a vertical video and let AI do the rest: transcribing, fast silence cutting, and smart-grouping.</p>
         </div>
 
         <!-- Upload Card -->
-        <div class="upload-card-wrap" style="background: linear-gradient(135deg, rgba(247,183,51,0.5), rgba(252,74,26,0.3), rgba(247,183,51,0.5));">
+        <div class="upload-card-wrap">
           <div class="upload-card"
                :class="{ dragover: dragover, disabled: uploading }"
                @dragover.prevent="dragover = true"
                @dragleave="dragover = false"
                @drop.prevent="e => { dragover = false; onDropFile(e); }">
             <input type="file" @change="onFileSelected" accept="video/*" title="" />
-            <span class="upload-icon" style="filter: drop-shadow(0 0 16px rgba(247,183,51,0.5));">✨</span>
+            <span class="upload-icon">+</span>
             <div v-if="uploadFile">
               <h2>{{ uploadFile.name }}</h2>
               <p>{{ (uploadFile.size / 1024 / 1024).toFixed(1) }} MB selected</p>
@@ -368,7 +368,7 @@ export default {
           <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 1rem;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
               <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-dim);">🔑 Gemini API Key</span>
-              <a href="https://aistudio.google.com/apikey" target="_blank" style="color: #f7b733; font-size: 0.72rem; text-decoration: none;">Get one free</a>
+              <a href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent); font-size: 0.72rem; text-decoration: underline; text-underline-offset: 2px;">Get one free</a>
             </div>
             <input type="password" v-model="apiKey"
                    placeholder="Paste your Google Gemini API key…"
@@ -393,11 +393,11 @@ export default {
 
         <!-- Start Button -->
         <div style="max-width: 560px; width: 100%; margin-top: 1.5rem;">
-          <button class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1rem; background: linear-gradient(135deg, #f7b733, #fc4a1a); border: none; color: white; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: opacity 0.2s;"
+          <button class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1rem; display: flex; justify-content: center; align-items: center; cursor: pointer; transition: opacity 0.2s;"
                   :disabled="!canStart()"
                   :style="{ opacity: canStart() ? 1 : 0.5 }"
                   @click="startRefine">
-            <span style="margin-right: 8px; font-size: 1.2rem;">🚀</span> Start Auto-Refine
+            Start Auto-Refine
           </button>
         </div>
 
@@ -427,7 +427,7 @@ export default {
               <div v-if="!collapsedFolders.has(folder)" class="folder-content">
                 <div v-for="f in files" :key="f.filename" class="upload-item" 
                      @click="selectedFile = f.filename; uploadFile = null" 
-                     :style="selectedFile === f.filename ? 'border-color: #f7b733; box-shadow: 0 4px 20px rgba(247, 183, 51, 0.4); transform: translateY(-4px);' : ''" 
+                     :style="selectedFile === f.filename ? 'border-color: var(--accent); background: var(--surface2);' : ''" 
                      style="cursor: pointer; position: relative;">
                   <div class="upload-item-thumb">
                     <video
@@ -446,10 +446,10 @@ export default {
                     </button>
                   </div>
                   <div class="upload-item-body">
-                    <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: #f7b733;' : ''">{{ f.name || f.filename }}</div>
+                    <div class="upload-item-name" :title="f.name || f.filename" :style="selectedFile === f.filename ? 'color: var(--accent);' : ''">{{ f.name || f.filename }}</div>
                     <div class="upload-item-meta">
                       {{ f.size_mb }}{{ f.size_mb === 'Rendered' ? '' : ' MB' }}
-                      <span v-if="selectedFile === f.filename" style="margin-left: auto; color: #f7b733; font-weight: bold; background: rgba(247,183,51,0.1); padding: 2px 6px; border-radius: 4px;">Selected</span>
+                      <span v-if="selectedFile === f.filename" style="margin-left: auto; color: var(--accent-fg); font-weight: 600; background: var(--accent); padding: 2px 6px; border-radius: 4px;">Selected</span>
                     </div>
                   </div>
                 </div>
@@ -462,12 +462,12 @@ export default {
       <!-- PROCESSING STEP -->
       <div v-else-if="step === 'processing'" class="refine-processing" style="margin: 4rem auto; max-width: 560px; width: 100%;">
         <div class="upload-hero">
-          <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; background: linear-gradient(135deg, #f7b733, #fc4a1a); -webkit-background-clip: text; color: transparent;">🔄 Refining your video…</h2>
+          <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; font-weight:600; letter-spacing:-0.02em;">Refining your video…</h2>
           <p>This may take a few minutes. Don't close this tab.</p>
         </div>
 
         <div class="refine-progress-bar" style="height: 10px; background: rgba(255,255,255,0.05); border-radius: 5px; overflow: hidden; margin: 2rem 0 1rem;">
-          <div class="refine-progress-fill" :style="{ width: progressPct + '%', background: 'linear-gradient(90deg, #f7b733, #fc4a1a)', height: '100%', transition: 'width 0.4s ease' }"></div>
+          <div class="refine-progress-fill" :style="{ width: progressPct + '%', background: 'var(--accent)', height: '100%', transition: 'width 0.4s ease' }"></div>
         </div>
         <div class="refine-progress-label" style="text-align: center; color: var(--text-dim); margin-bottom: 2rem; font-weight: 600;">{{ progressPct }}%</div>
 
@@ -475,7 +475,7 @@ export default {
           <div v-for="(s, si) in STEP_ORDER" :key="s"
                class="refine-step"
                style="display: flex; align-items: center; gap: 12px; font-size: 0.9rem;"
-               :style="stepIndex > si ? 'color: #4caf50;' : (progress.step === s ? 'color: #f7b733; font-weight: 600;' : 'color: var(--text-dim);')">
+               :style="stepIndex > si ? 'color: var(--success);' : (progress.step === s ? 'color: var(--accent); font-weight: 600;' : 'color: var(--text-dim);')">
             <span class="refine-step-icon" style="flex-shrink: 0; width: 24px; text-align: center;">
               <template v-if="stepIndex > si">✅</template>
               <template v-else-if="progress.step === s">⏳</template>
@@ -491,9 +491,9 @@ export default {
       <!-- DONE STEP -->
       <div v-else-if="step === 'done'" class="refine-done" style="margin: 4rem auto; text-align: center; max-width: 500px;">
         <div class="refine-done-icon" style="font-size: 4rem; margin-bottom: 1rem;">🎉</div>
-        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: #4caf50;">Refine Complete!</h2>
+        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--success); font-weight:600; letter-spacing:-0.02em;">Refine Complete</h2>
         <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 2rem;">Your video has been transcribed, silence-cut, speaker-identified, and smart-grouped.</p>
-        <p class="refine-done-hint" style="color: #f7b733; font-weight: 600;">Opening in editor…</p>
+        <p class="refine-done-hint" style="color: var(--accent); font-weight: 600;">Opening in editor…</p>
       </div>
 
       <!-- ERROR STEP -->

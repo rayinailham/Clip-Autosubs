@@ -186,7 +186,7 @@ export default store;
 // ── Speaker color palette ───────────────────
 
 const SPEAKER_PALETTE = [
-  { bg: 'rgba(124, 92, 252, 0.30)', border: 'rgba(124, 92, 252, 0.65)', text: '#7C5CFC', label: '#b4a0ff' },
+  { bg: 'rgba(217, 255, 61, 0.22)', border: 'rgba(217, 255, 61, 0.55)', text: '#d9ff3d', label: '#e6ff66' },
   { bg: 'rgba(76, 175, 80, 0.30)',  border: 'rgba(76, 175, 80, 0.65)',  text: '#4CAF50', label: '#81C784' },
   { bg: 'rgba(255, 152, 0, 0.30)',  border: 'rgba(255, 152, 0, 0.65)',  text: '#FF9800', label: '#FFB74D' },
   { bg: 'rgba(233, 30, 99, 0.30)',  border: 'rgba(233, 30, 99, 0.65)',  text: '#E91E63', label: '#F06292' },

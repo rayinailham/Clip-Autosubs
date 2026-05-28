@@ -17,26 +17,36 @@
    The split CSS files in styles/ are the source of
    truth. This block will be removed once verified.
    ═══════════════════════════════════════════════ */
-/* ── Base ─────────────────────────────────────── */
+/* ── Legacy fallback — tokens defined in styles/base.css ───
+   This block kept only as defensive fallback. The cascade order means
+   this overrides base.css if both load, so it MUST mirror base.css. */
 :root {
-  --bg: #0a0a10;
-  --surface: #13131c;
-  --surface2: #1a1a26;
-  --surface3: #222230;
-  --border: #252535;
-  --accent: #7c5cfc;
-  --accent2: #00d4ff;
-  --accent-hover: #9575ff;
-  --accent-dim: rgba(124, 92, 252, 0.25);
-  --text: #dcdce8;
-  --text-dim: #7070a0;
-  --success: #00e5cc;
-  --error: #ff6b6b;
-  --warning: #fdcb6e;
-  --highlight: #ffd700;
-  --radius: 14px;
-  --radius-sm: 7px;
-  --glow: 0 0 40px rgba(124, 92, 252, 0.25);
+  --bg:           #0a0a0b;
+  --surface:      #111114;
+  --surface2:     #16161a;
+  --surface3:     #1d1d22;
+  --surface4:     #25252b;
+  --border:       #26262c;
+  --border-strong:#36363e;
+  --accent:       #d9ff3d;
+  --accent-hover: #e6ff66;
+  --accent-fg:    #0a0a0b;
+  --accent-dim:   rgba(217,255,61,0.10);
+  --accent-soft:  rgba(217,255,61,0.18);
+  --accent2:      #f4f4f5;
+  --text:         #ededee;
+  --text-dim:     #8a8a92;
+  --text-faint:   #5e5e66;
+  --success:      #4ade80;
+  --error:        #f87171;
+  --warning:      #f59e0b;
+  --highlight:    #d9ff3d;
+  --radius:       8px;
+  --radius-sm:    4px;
+  --radius-lg:    12px;
+  --glow:         0 0 0 0 transparent;
+  --font-sans:    'Geist', 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --font-mono:    'Geist Mono', 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace;
 }
 
 * {
@@ -46,14 +56,12 @@
 }
 
 body {
-  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-family: var(--font-sans);
   background: var(--bg);
   color: var(--text);
-  min-height: 100vh;
-  /* Subtle bg grid */
-  background-image:
-    radial-gradient(ellipse 70% 50% at 15% 0%, rgba(124, 92, 252, 0.08) 0%, transparent 60%),
-    radial-gradient(ellipse 50% 40% at 85% 100%, rgba(0, 212, 255, 0.06) 0%, transparent 60%);
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 /* ── Header ──────────────────────────────────── */
@@ -72,13 +80,12 @@ header {
 }
 
 header h1 {
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: -0.3px;
-  background: linear-gradient(135deg, #a78bfa 0%, var(--accent2) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  font-family: var(--font-mono);
+  text-transform: lowercase;
 }
 
 .status-pills {
@@ -137,14 +144,12 @@ header h1 {
 }
 
 .upload-hero h2 {
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  background: linear-gradient(135deg, #a78bfa 0%, var(--accent2) 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  margin-bottom: 0.4rem;
+  font-size: 2.6rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--text);
+  margin-bottom: 0.75rem;
 }
 
 .upload-hero p {
@@ -152,46 +157,38 @@ header h1 {
   font-size: 0.9rem;
 }
 
-/* Animated card border */
+/* Static, neutral border — animated rainbow strip removed */
 .upload-card-wrap {
   position: relative;
   max-width: 560px;
   width: 100%;
-  border-radius: calc(var(--radius) + 2px);
-  padding: 2px;
-  background: linear-gradient(135deg, rgba(124, 92, 252, 0.5), rgba(0, 212, 255, 0.3), rgba(124, 92, 252, 0.5));
-  background-size: 300% 300%;
-  animation: borderShift 6s ease infinite, fadeUp 0.5s ease both 0.1s;
+  border-radius: var(--radius);
+  padding: 0;
+  background: transparent;
+  animation: fadeUp 0.5s ease both 0.1s;
 }
 
 @keyframes borderShift {
-  0% {
-    background-position: 0% 50%;
-  }
-
-  50% {
-    background-position: 100% 50%;
-  }
-
-  100% {
-    background-position: 0% 50%;
-  }
+  /* kept as no-op so any legacy reference doesn't error */
+  0%, 100% { background-position: 0 0; }
 }
 
 .upload-card {
   background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 3.5rem 3rem;
+  padding: 4rem 3rem;
   text-align: center;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: border-color 0.2s, background 0.2s;
   width: 100%;
   position: relative;
 }
 
 .upload-card:hover,
 .upload-card.dragover {
-  background: rgba(124, 92, 252, 0.07);
+  border-color: var(--accent);
+  background: var(--surface2);
 }
 
 .upload-card.dragover .upload-card-wrap {
@@ -211,23 +208,11 @@ header h1 {
 }
 
 .upload-icon {
-  font-size: 3.8rem;
-  margin-bottom: 1.2rem;
+  font-size: 2.4rem;
+  margin-bottom: 1.25rem;
   display: block;
-  filter: drop-shadow(0 0 16px rgba(124, 92, 252, 0.5));
-  animation: floatIcon 3s ease-in-out infinite;
-}
-
-@keyframes floatIcon {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-5px);
-  }
+  color: var(--text-dim);
+  line-height: 1;
 }
 
 .upload-card h2 {
@@ -278,7 +263,7 @@ header h1 {
 .progress-fill {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, var(--accent), var(--success));
+  background: var(--accent);
   width: 30%;
   animation: indeterminate 1.5s infinite ease-in-out;
 }
@@ -632,8 +617,8 @@ header h1 {
 }
 
 .word-chip:hover {
-  background: rgba(108, 92, 231, 0.2);
-  border-color: var(--accent);
+  background: var(--accent-dim);
+  border-color: var(--border-strong);
 }
 
 .word-chip.selected {
@@ -890,7 +875,6 @@ header h1 {
 .preset-btn.active {
   border-color: var(--accent);
   background: var(--accent-dim);
-  box-shadow: 0 0 12px rgba(124, 92, 252, 0.3);
 }
 
 .preset-icon {
@@ -923,20 +907,19 @@ header h1 {
   letter-spacing: 0.5px;
 }
 
-/* Static preset buttons - subtle blue tint */
+/* Static preset — neutral, accent on active only */
 .preset-btn.static-preset {
-  border-color: rgba(0, 212, 255, 0.2);
+  border-color: var(--border);
 }
 
 .preset-btn.static-preset:hover {
-  border-color: var(--accent2);
-  background: rgba(0, 212, 255, 0.15);
+  border-color: var(--border-strong);
+  background: var(--surface3);
 }
 
 .preset-btn.static-preset.active {
-  border-color: var(--accent2);
-  background: rgba(0, 212, 255, 0.2);
-  box-shadow: 0 0 12px rgba(0, 212, 255, 0.3);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 /* Mode-specific section visibility helpers */
@@ -1050,7 +1033,6 @@ header h1 {
 .mode-toggle-btn.active {
   border-color: var(--accent);
   background: var(--accent-dim);
-  box-shadow: 0 0 12px rgba(124, 92, 252, 0.3);
 }
 
 .mode-toggle-btn .mode-icon {
@@ -1074,7 +1056,7 @@ header h1 {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.75rem;
-  background: rgba(124, 92, 252, 0.05);
+  background: var(--surface2);
 }
 
 #animation-section.disabled {
@@ -1258,7 +1240,7 @@ header h1 {
 }
 
 .group-item:hover {
-  background: rgba(124, 92, 252, 0.04);
+  background: var(--surface2);
 }
 
 .group-item-header {
@@ -1474,22 +1456,18 @@ header h1 {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #5b42d4);
-  color: #fff;
-  box-shadow: 0 2px 12px rgba(124, 92, 252, 0.35);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
 }
 
 .btn-primary:hover {
-  background: linear-gradient(135deg, var(--accent-hover), #6a50e8);
-  box-shadow: 0 4px 20px rgba(124, 92, 252, 0.5);
-  transform: translateY(-1px);
+  background: var(--accent-hover);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
 }
 
 .btn-success {

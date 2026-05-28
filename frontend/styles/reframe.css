@@ -16,13 +16,12 @@
 }
 
 .home-title {
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent2) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  margin-bottom: .5rem;
+  font-size: clamp(2rem, 4.5vw, 3.2rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--text);
+  margin-bottom: 0.6rem;
 }
 
 .home-sub {
@@ -41,7 +40,7 @@
 
 .home-card {
   background: var(--surface);
-  border: 1.5px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 2rem 1.75rem;
   flex: 1 1 0;
@@ -50,31 +49,22 @@
   display: flex;
   flex-direction: column;
   gap: .6rem;
-  transition: border-color .2s, box-shadow .2s, transform .15s;
+  transition: border-color .2s, background .2s;
   position: relative;
   overflow: hidden;
 }
 
-.home-card::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(124,92,252,0.07) 0%, transparent 70%);
-  pointer-events: none;
-}
+.home-card::before { content: none; }
 
 .home-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 0 32px rgba(124,92,252,0.18);
-  transform: translateY(-3px);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
-.home-card--vtuber::before {
-  background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(0,212,255,0.07) 0%, transparent 70%);
-}
+.home-card--vtuber::before { content: none; }
 .home-card--vtuber:hover {
-  border-color: var(--accent2);
-  box-shadow: 0 0 32px rgba(0,212,255,0.18);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
 .home-card-icon {
@@ -84,8 +74,9 @@
 }
 
 .home-card-title {
-  font-size: 1.35rem;
-  font-weight: 700;
+  font-size: 1.2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--text);
 }
 
@@ -193,15 +184,15 @@
 }
 
 .reframe-panel-badge--top {
-  background: rgba(124,92,252,0.25);
+  background: var(--accent-dim);
   color: var(--accent);
-  border: 1px solid rgba(124,92,252,0.4);
+  border: 1px solid var(--accent);
 }
 
 .reframe-panel-badge--bottom {
-  background: rgba(0,212,255,0.15);
-  color: var(--accent2);
-  border: 1px solid rgba(0,212,255,0.3);
+  background: var(--surface3);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
 }
 
 .reframe-divider {
@@ -258,12 +249,11 @@
   width: 100%;
   aspect-ratio: 9 / 16;
   background: #000;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  border: 1.5px solid var(--border);
-  box-shadow: 0 4px 32px rgba(0,0,0,0.6);
+  border: 1px solid var(--border);
   position: relative;
 }
 
@@ -294,8 +284,8 @@
 }
 
 .reframe-section-label--bottom {
-  background: rgba(0,212,255,0.25);
-  color: var(--accent2);
+  background: rgba(0,0,0,0.55);
+  color: rgba(255,255,255,0.7);
 }
 
 /* ── Subtitle zone ── */
@@ -362,14 +352,15 @@
   font-size: .8rem;
 }
 
-/* ── Accent button variant ── */
+/* ── Accent button variant — flat neutral ── */
 .btn-accent {
-  background: linear-gradient(135deg, #00b4d8 0%, #0096c7 100%);
-  color: #fff;
-  border: none;
+  background: var(--surface3);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
 }
 .btn-accent:hover {
-  background: linear-gradient(135deg, #0096c7 0%, #0077b6 100%);
+  background: var(--surface4);
+  border-color: var(--text-faint);
 }
 
 /* ── Ghost button (text-only) ── */
@@ -417,20 +408,19 @@
 
 .shorts-mode-card {
   background: var(--surface);
-  border: 1.5px solid var(--border);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 1.75rem 1.5rem;
   cursor: pointer;
-  transition: border-color .15s, transform .12s, box-shadow .15s;
+  transition: border-color .15s, background .15s;
   display: flex;
   flex-direction: column;
   gap: .5rem;
 }
 
 .shorts-mode-card:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(0,180,216,.18);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
 .shorts-mode-icon {
@@ -440,8 +430,9 @@
 }
 
 .shorts-mode-card h3 {
-  font-size: 1.1rem;
-  font-weight: 700;
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0;
   color: var(--text);
 }

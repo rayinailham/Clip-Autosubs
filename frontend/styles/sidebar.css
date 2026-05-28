@@ -50,7 +50,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0.75rem;
-  background: rgba(124, 92, 252, 0.05);
+  background: var(--surface2);
 }
 .mode-toggle-row { display: flex; gap: 0.5rem; }
 .mode-toggle-btn {
@@ -65,10 +65,10 @@
   cursor: pointer;
   transition: all 0.2s ease;
 }
-.mode-toggle-btn:hover        { border-color: var(--accent); background: var(--accent-dim); }
-.mode-toggle-btn.active       { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 12px rgba(124, 92, 252, 0.3); }
+.mode-toggle-btn:hover        { border-color: var(--border-strong); background: var(--surface3); }
+.mode-toggle-btn.active       { border-color: var(--accent); background: var(--accent-dim); }
 .mode-toggle-btn .mode-icon   { font-size: 1.2rem; margin-bottom: 0.3rem; }
-.mode-toggle-btn .mode-label  { font-size: 0.8rem; font-weight: 600; color: var(--text); }
+.mode-toggle-btn .mode-label  { font-size: 0.78rem; font-weight: 500; color: var(--text); }
 .mode-toggle-btn .mode-desc   { font-size: 0.6rem; color: var(--text-dim); margin-top: 0.15rem; }
 
 /* ── Preset Grid ──────────────────────────────── */
@@ -90,18 +90,18 @@
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.preset-btn:hover  { border-color: var(--accent); background: var(--accent-dim); }
-.preset-btn.active { border-color: var(--accent); background: var(--accent-dim); box-shadow: 0 0 12px rgba(124, 92, 252, 0.3); }
+.preset-btn:hover  { border-color: var(--border-strong); background: var(--surface3); }
+.preset-btn.active { border-color: var(--accent); background: var(--accent-dim); }
 .preset-icon { font-size: 1rem; font-weight: 700; margin-bottom: 0.2rem; }
 .preset-icon.neon-text  { color: #00FFFF; text-shadow: 0 0 8px #00FFFF, 0 0 16px #FF00FF; font-size: 0.8rem; }
 .preset-icon.anime-text { color: #FF4444; font-size: 0.75rem; }
 .preset-icon.retro-text { color: #FF6B6B; font-family: 'Courier New', monospace; font-size: 0.75rem; }
 .preset-name { font-size: 0.6rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
 
-/* Static preset tint */
-.preset-btn.static-preset          { border-color: rgba(0, 212, 255, 0.2); }
-.preset-btn.static-preset:hover    { border-color: var(--accent2); background: rgba(0, 212, 255, 0.15); }
-.preset-btn.static-preset.active   { border-color: var(--accent2); background: rgba(0, 212, 255, 0.2); box-shadow: 0 0 12px rgba(0, 212, 255, 0.3); }
+/* Static preset — same accent, slightly different state */
+.preset-btn.static-preset          { border-color: var(--border); }
+.preset-btn.static-preset:hover    { border-color: var(--border-strong); background: var(--surface3); }
+.preset-btn.static-preset.active   { border-color: var(--accent); background: var(--accent-dim); }
 
 /* ── Emotion Grid ─────────────────────────────── */
 .emotion-grid {

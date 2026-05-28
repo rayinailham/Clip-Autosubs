@@ -369,14 +369,14 @@ export default {
         const c = getSpeakerColor(g.speaker);
         return c.bg;
       }
-      return 'rgba(124, 92, 252, 0.30)';
+      return 'rgba(217, 255, 61, 0.22)';
     }
     function groupBorderColor(g) {
       if (g && g.speaker) {
         const c = getSpeakerColor(g.speaker);
         return c.border;
       }
-      return 'rgba(124, 92, 252, 0.65)';
+      return 'rgba(217, 255, 61, 0.55)';
     }
 
     // ── Multi-speaker support ─────────────────────────────

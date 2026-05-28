@@ -71,8 +71,8 @@
   padding: 2px 8px;
   border-radius: 20px;
 }
-.ytc-badge--green { background: rgba(0,229,204,0.15); color: var(--success); }
-.ytc-badge--red   { background: rgba(255,107,107,0.15); color: var(--error); }
+.ytc-badge--green { background: rgba(74,222,128,0.12); color: var(--success); border: 1px solid rgba(74,222,128,0.3); }
+.ytc-badge--red   { background: rgba(248,113,113,0.12); color: var(--error); border: 1px solid rgba(248,113,113,0.3); }
 
 .ytc-key-row {
   display: flex;
@@ -94,7 +94,7 @@
   color: var(--text-dim);
   line-height: 1.5;
 }
-.ytc-key-hint a { color: var(--accent2); }
+.ytc-key-hint a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .ytc-key-hint code {
   background: var(--surface3);
   padding: 1px 5px;
@@ -248,7 +248,7 @@
   user-select: none;
 }
 .ytc-clip-item:hover { background: var(--surface2); }
-.ytc-clip-item--selected { border-color: var(--accent); background: rgba(124,92,252,0.06); }
+.ytc-clip-item--selected { border-color: var(--accent); background: var(--accent-dim); }
 
 .ytc-clip-check {
   flex-shrink: 0;
@@ -275,7 +275,8 @@
 
 .ytc-clip-time {
   font-size: 0.8rem;
-  color: var(--accent2);
+  color: var(--text);
+  font-family: var(--font-mono);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
@@ -315,7 +316,7 @@
 }
 .ytc-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  background: var(--accent);
   border-radius: 3px;
   transition: width 0.3s ease;
 }
@@ -347,8 +348,8 @@
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .ytc-done-clip-card:hover {
-  border-color: var(--accent);
-  box-shadow: 0 4px 20px rgba(124,92,252,0.12);
+  border-color: var(--border-strong);
+  background: var(--surface3);
 }
 
 /* Video thumbnail */
@@ -400,7 +401,8 @@
 
 .ytc-done-clip-time {
   font-size: 0.78rem;
-  color: var(--accent2);
+  color: var(--text);
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -422,23 +424,19 @@
 }
 
 /* ── Home Card variant ───────────────────────── */
-.home-card--ytclipper {
-  border-color: rgba(255, 100, 0, 0.2);
-}
+.home-card--ytclipper { border-color: var(--border); }
 .home-card--ytclipper:hover {
-  border-color: #ff6400;
-  box-shadow: 0 8px 30px rgba(255,100,0,0.15);
+  border-color: var(--border-strong);
+  background: var(--surface2);
 }
 
 .btn-yt {
-  background: linear-gradient(135deg, #ff0000, #ff6400);
-  color: #fff;
+  background: var(--text);
+  color: var(--bg);
   border: none;
+  font-weight: 600;
 }
-.btn-yt:hover {
-  background: linear-gradient(135deg, #cc0000, #dd5500);
-  transform: translateY(-1px);
-}
+.btn-yt:hover { background: #fff; }
 
 /* ── Advanced toggles (chat signal / story setup) ───────────── */
 .ytc-toggles {
@@ -465,7 +463,7 @@
 .ytc-toggle input[type="checkbox"] {
   margin-top: 3px;
   flex-shrink: 0;
-  accent-color: #ff6400;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
