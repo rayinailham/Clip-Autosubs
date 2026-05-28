@@ -17,6 +17,9 @@ import subprocess
 from pathlib import Path
 
 from renderer import get_video_info
+from logger import get_logger
+
+log = get_logger("reframe_renderer")
 
 
 # ──────────────────────────────────────────────────────────────

@@ -4,6 +4,10 @@ import subprocess
 import asyncio
 from pathlib import Path
 
+from logger import get_logger
+
+log = get_logger("html_renderer")
+
 # Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"

@@ -10,6 +10,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from logger import get_logger
+
+log = get_logger("renderer")
+
 
 def check_ffmpeg() -> dict:
     """Check if ffmpeg and ffprobe binaries are available on PATH."""

@@ -16,6 +16,10 @@ from typing import Optional
 
 import requests
 
+from logger import get_logger
+
+log = get_logger("transcribe")
+
 
 ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
