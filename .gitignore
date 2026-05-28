@@ -41,6 +41,7 @@ env/
 outputs/
 rendered/
 uploads/
+.yt_cache/
 __pycache__/
 .pytest_cache/
 
