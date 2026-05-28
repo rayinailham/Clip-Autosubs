@@ -1,88 +1,56 @@
 """
-WhisperX Transcription Engine
-Extracts word-level timestamps from video/audio files.
+Transcription Engine — ElevenLabs Scribe ONLY.
+No local models, no torch, no whisperx.
 
-Hardware target: RTX 3060 6GB VRAM
-Uses int8 compute to stay within VRAM limits.
+Uploads audio extracted from a video file to the ElevenLabs Speech-to-Text API
+and returns word-level timestamps in the same shape the rest of the app expects.
 """
 
-import gc
 import json
-import logging
 import os
 import subprocess
-import time
-import warnings
 import tempfile
+import time
 from pathlib import Path
+from typing import Optional
 
 import requests
 
-# Suppress noisy third-party warnings before importing them
-warnings.filterwarnings("ignore", message="(?s).*torchcodec is not installed.*")
-warnings.filterwarnings("ignore", message="(?s).*TensorFloat-32.*")
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", message="(?s).*Lightning automatically upgraded.*")
-logging.getLogger("whisperx").setLevel(logging.WARNING)
-logging.getLogger("pyannote").setLevel(logging.WARNING)
-logging.getLogger("lightning").setLevel(logging.WARNING)
-logging.getLogger("lightning_fabric").setLevel(logging.WARNING)
 
-import torch
-import whisperx
+ELEVENLABS_STT_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
 
-# ─── Configuration ───────────────────────────────────────────
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-COMPUTE_TYPE = "int8"        # CRITICAL: prevents OOM on 6GB VRAM
-BATCH_SIZE = 4               # conservative for 6GB VRAM
-MODEL_SIZE = "large-v2"      # best accuracy; fits in 6GB with int8
-# ─────────────────────────────────────────────────────────────
-
-
-def flush_gpu():
-    """Free GPU memory between pipeline stages."""
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-
-def get_vram_usage() -> dict:
-    """Return current VRAM usage in MB."""
-    if not torch.cuda.is_available():
-        return {"allocated_mb": 0, "reserved_mb": 0, "total_mb": 0}
-    return {
-        "allocated_mb": round(torch.cuda.memory_allocated() / 1024**2, 1),
-        "reserved_mb": round(torch.cuda.memory_reserved() / 1024**2, 1),
-        "total_mb": round(torch.cuda.get_device_properties(0).total_memory / 1024**2, 1),
-    }
-
-
-def transcribe_video(video_path: str, output_dir: str | None = None,
-                     hf_token: str | None = None,
-                     min_speakers: int | None = None,
-                     max_speakers: int | None = None,
-                     model_id: str = "large-v2",
-                     elevenlabs_api_key: str | None = None) -> dict:
+def transcribe_video(
+    video_path: str,
+    output_dir: Optional[str] = None,
+    model_id: str = "scribe_v1",
+    elevenlabs_api_key: Optional[str] = None,
+    # Legacy args kept for back-compat — ignored.
+    hf_token: Optional[str] = None,
+    min_speakers: Optional[int] = None,
+    max_speakers: Optional[int] = None,
+    diarize: Optional[bool] = None,
+    language_code: Optional[str] = None,
+) -> dict:
     """
-    Full transcription pipeline:
-      1. Load audio from video
-      2. Transcribe with WhisperX (batched, int8)
-      3. Align to get word-level timestamps
-      4. (Optional) Diarize to assign speaker labels
-      5. Return structured JSON
+    Transcribe a video/audio file via ElevenLabs Scribe.
 
     Args:
-        video_path: Path to input video/audio file.
-        output_dir:  Directory to write JSON output. If None, uses same dir as video.
-        hf_token:    HuggingFace access token for speaker diarization (pyannote).
-                     If None, diarization is skipped.
-        min_speakers: Minimum expected number of speakers (optional hint).
-        max_speakers: Maximum expected number of speakers (optional hint).
+        video_path: Path to the input file.
+        output_dir: Directory to write the JSON output.
+        model_id: ElevenLabs STT model id (e.g. "scribe_v1").
+        elevenlabs_api_key: ElevenLabs API key. Required.
+        diarize: If True, ask the API to return speaker labels.
+        language_code: Optional ISO language hint.
 
     Returns:
         dict with keys: words, metadata
     """
+    if not elevenlabs_api_key:
+        raise RuntimeError(
+            "ElevenLabs API key is required. Set it in the Settings page."
+        )
+
     video_path = Path(video_path).resolve()
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
@@ -92,264 +60,124 @@ def transcribe_video(video_path: str, output_dir: str | None = None,
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if model_id == "scribe_v2":
-        if not elevenlabs_api_key:
-            raise ValueError("ElevenLabs API key is required when using scribe_v2 model.")
-        return _transcribe_elevenlabs(video_path, output_dir, elevenlabs_api_key)
-
-    print(f"[transcribe] Device: {DEVICE} | Compute: {COMPUTE_TYPE} | Batch: {BATCH_SIZE}")
-    print(f"[transcribe] VRAM before start: {get_vram_usage()}")
-
+    print(f"[transcribe] ElevenLabs Scribe ({model_id}) — {video_path.name}")
     t_start = time.time()
 
-    # ── Step 1: Load audio ──────────────────────────────────
-    print("[transcribe] Loading audio...")
-    audio = whisperx.load_audio(str(video_path))
-    print(f"[transcribe] Audio loaded — {len(audio)/16000:.1f}s @ 16kHz")
-
-    # ── Step 2: Transcribe ──────────────────────────────────
-    print(f"[transcribe] Loading model '{model_id}' ({COMPUTE_TYPE})...")
-    model = whisperx.load_model(
-        model_id,
-        DEVICE,
-        compute_type=COMPUTE_TYPE,
-    )
-    print(f"[transcribe] VRAM after model load: {get_vram_usage()}")
-
-    print("[transcribe] Transcribing (task=translate)...")
-    result = model.transcribe(audio, batch_size=BATCH_SIZE, task="translate")
-    detected_language = result.get("language", "en")  # original source language
-    if detected_language == "en":
-        print(f"[transcribe] Detected language: en")
-    else:
-        print(f"[transcribe] Detected language: {detected_language} -> translating to English")
-    print(f"[transcribe] Segments (pre-align): {len(result['segments'])}")
-
-    # Free transcription model before loading alignment model
-    del model
-    flush_gpu()
-    print(f"[transcribe] VRAM after model flush: {get_vram_usage()}")
-
-    # ── Step 3: Align (word-level timestamps) ───────────────
-    # Always align against English since translation output is always English.
-    # Using source language here would misalign phonemes with translated text.
-    print("[transcribe] Loading alignment model (en)...")
-    model_a, metadata = whisperx.load_align_model(
-        language_code="en",
-        device=DEVICE,
-    )
-    print(f"[transcribe] VRAM after align model load: {get_vram_usage()}")
-
-    print("[transcribe] Aligning...")
-    result = whisperx.align(
-        result["segments"],
-        model_a,
-        metadata,
-        audio,
-        DEVICE,
-        return_char_alignments=False,
-    )
-
-    # Free alignment model
-    del model_a
-    flush_gpu()
-    print(f"[transcribe] VRAM after align flush: {get_vram_usage()}")
-
-    # ── Step 4: Speaker diarization (optional) ──────────────
-    speakers_detected = 0
-    if False and hf_token:
-        try:
-            from whisperx.diarize import DiarizationPipeline
-
-            print("[transcribe] Loading diarization model (pyannote)...")
-            diarize_model = DiarizationPipeline(
-                use_auth_token=hf_token,
-                device=DEVICE,
+    # ── Extract audio (mp3 128k) to keep upload small ─────────────────────
+    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+        audio_path = tmp.name
+    try:
+        print("[transcribe] Extracting audio…")
+        ff = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(video_path),
+                "-vn", "-c:a", "libmp3lame", "-b:a", "128k",
+                audio_path,
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+        if ff.returncode != 0:
+            raise RuntimeError(
+                f"ffmpeg audio extraction failed:\n{ff.stderr[-1000:]}"
             )
-            print(f"[transcribe] VRAM after diarize model load: {get_vram_usage()}")
 
-            print("[transcribe] Running speaker diarization...")
-            diarize_kwargs = {}
-            if min_speakers is not None:
-                diarize_kwargs["min_speakers"] = min_speakers
-            if max_speakers is not None:
-                diarize_kwargs["max_speakers"] = max_speakers
+        # ── Upload ─────────────────────────────────────────────────────────
+        headers = {"xi-api-key": elevenlabs_api_key}
+        data = {
+            "model_id": model_id,
+            "tag_audio_events": "false",
+            "diarize": "true" if diarize else "false",
+        }
+        if language_code:
+            data["language_code"] = language_code
 
-            diarize_segments = diarize_model(audio, **diarize_kwargs)
-            result = whisperx.assign_word_speakers(diarize_segments, result)
+        print(f"[transcribe] Uploading {Path(audio_path).stat().st_size / 1e6:.1f}MB to ElevenLabs…")
+        with open(audio_path, "rb") as f:
+            files = {"file": (Path(audio_path).name, f, "audio/mpeg")}
+            res = requests.post(
+                ELEVENLABS_STT_URL,
+                headers=headers,
+                data=data,
+                files=files,
+                timeout=600,
+            )
 
-            # Count unique speakers
-            speaker_set = set()
-            for seg in result.get("segments", []):
-                if seg.get("speaker"):
-                    speaker_set.add(seg["speaker"])
-                for w in seg.get("words", []):
-                    if w.get("speaker"):
-                        speaker_set.add(w["speaker"])
-            speakers_detected = len(speaker_set)
-            print(f"[transcribe] Diarization complete — {speakers_detected} speakers detected")
+        if res.status_code != 200:
+            raise RuntimeError(
+                f"ElevenLabs API error {res.status_code}: {res.text[:500]}"
+            )
+        payload = res.json()
 
-            del diarize_model
-            flush_gpu()
-            print(f"[transcribe] VRAM after diarize flush: {get_vram_usage()}")
+    finally:
+        try:
+            os.remove(audio_path)
+        except OSError:
+            pass
 
-        except ImportError:
-            print("[transcribe] WARNING: whisperx.diarize not available, skipping diarization")
-        except Exception as e:
-            print(f"[transcribe] WARNING: Diarization failed ({e}), continuing without speaker labels")
-    else:
-        print("[transcribe] No HuggingFace token provided — skipping diarization")
-
-    # ── Step 5: Extract word-level data ─────────────────────
+    # ── Normalise word list ───────────────────────────────────────────────
     words = []
-    for segment in result.get("segments", []):
-        segment_speaker = segment.get("speaker")
-        for w in segment.get("words", []):
-            word_entry = {
-                "text": w.get("word", "").strip(),
-                "start": round(w.get("start", 0), 3),
-                "end": round(w.get("end", 0), 3),
-            }
-            # Add speaker label if available (from word or segment level)
-            speaker = w.get("speaker") or segment_speaker
-            if speaker:
-                word_entry["speaker"] = speaker
-            # Only include words that have valid timestamps
-            if word_entry["text"] and word_entry["start"] >= 0 and word_entry["end"] > 0:
-                words.append(word_entry)
+    for w in payload.get("words", []):
+        text = (w.get("text") or "").strip()
+        if not text:
+            continue
+        # ElevenLabs returns punctuation as separate "type":"spacing"/"punctuation" entries.
+        # Skip non-word entries.
+        wtype = w.get("type", "word")
+        if wtype not in ("word", None):
+            continue
+        entry = {
+            "text": text,
+            "start": round(float(w.get("start", 0)), 3),
+            "end": round(float(w.get("end", 0)), 3),
+        }
+        spk = w.get("speaker_id") or w.get("speaker")
+        if spk:
+            entry["speaker"] = str(spk)
+        if entry["end"] > entry["start"]:
+            words.append(entry)
 
     elapsed = round(time.time() - t_start, 1)
+    speakers = sorted({w["speaker"] for w in words if "speaker" in w})
 
+    duration = words[-1]["end"] if words else 0.0
     output = {
         "metadata": {
             "source_file": video_path.name,
-            "source_language": detected_language,
-            "language": "en",  # output is always English (translated)
+            "source_language": payload.get("language_code", "auto"),
+            "language": payload.get("language_code", "auto"),
             "model": model_id,
-            "compute_type": COMPUTE_TYPE,
-            "device": DEVICE,
-            "duration_seconds": round(len(audio) / 16000, 2),
+            "provider": "elevenlabs",
+            "duration_seconds": round(duration, 2),
             "processing_time_seconds": elapsed,
             "word_count": len(words),
-            "speakers_detected": speakers_detected,
+            "speakers_detected": len(speakers),
         },
         "words": words,
     }
 
-    # ── Save JSON ───────────────────────────────────────────
-    json_filename = video_path.stem + "_transcription.json"
-    json_path = output_dir / json_filename
+    json_path = output_dir / (video_path.stem + "_transcription.json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
-    print(f"[transcribe] Done! {len(words)} words in {elapsed}s")
-    if speakers_detected:
-        print(f"[transcribe]   -> {speakers_detected} speaker(s) detected")
-    print(f"[transcribe] JSON saved to: {json_path}")
-
+    print(f"[transcribe] Done — {len(words)} words in {elapsed}s -> {json_path.name}")
     return output
 
 
-def _transcribe_elevenlabs(video_path: Path, output_dir: Path, api_key: str) -> dict:
-    """Handle transcription via ElevenLabs API (Scribe v2)."""
-    print(f"[transcribe] Starting ElevenLabs Scribe v2 transcription for {video_path.name}...")
-    t_start = time.time()
-    
-    # 1. Extract audio to save upload bandwidth
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
-        audio_path = tmp.name
-        
-    try:
-        print("[transcribe] Extracting audio for upload...")
-        subprocess.run([
-            "ffmpeg", "-y", "-i", str(video_path), 
-            "-vn", "-c:a", "libmp3lame", "-b:a", "128k", 
-            audio_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        
-        # 2. Upload to ElevenLabs
-        url = "https://api.elevenlabs.io/v1/speech-to-text"
-        headers = {"xi-api-key": api_key}
-        data = {
-            "model_id": "scribe_v2",
-            "tag_audio_events": "false",
-            "diarize": "false"
-        }
-        
-        print("[transcribe] Uploading to ElevenLabs API...")
-        with open(audio_path, 'rb') as f:
-            files = {"file": (Path(audio_path).name, f, "audio/mpeg")}
-            res = requests.post(url, headers=headers, data=data, files=files)
-            
-        if res.status_code != 200:
-            raise RuntimeError(f"ElevenLabs API error {res.status_code}: {res.text}")
-            
-        res_json = res.json()
-        
-    finally:
-        if os.path.exists(audio_path):
-            os.remove(audio_path)
-            
-    # 3. Process output
-    extracted_words = []
-    for word_obj in res_json.get("words", []):
-        w_text = word_obj.get("text", "").strip()
-        if not w_text:
-            continue
-            
-        word_entry = {
-            "text": w_text,
-            "start": round(word_obj.get("start", 0), 3),
-            "end": round(word_obj.get("end", 0), 3),
-            "speaker": word_obj.get("speaker_id", "SPEAKER_00")
-        }
-        extracted_words.append(word_entry)
-        
-    elapsed = round(time.time() - t_start, 1)
-    speakers_detected = len({w["speaker"] for w in extracted_words})
-    
-    # Calculate duration
-    duration = 0
-    if extracted_words:
-        duration = extracted_words[-1]["end"]
-    
-    output = {
-        "metadata": {
-            "source_file": video_path.name,
-            "source_language": res_json.get("language_code", "en"),
-            "language": "en", # Ensure standard language key
-            "model": "scribe_v2",
-            "duration_seconds": duration,
-            "processing_time_seconds": elapsed,
-            "word_count": len(extracted_words),
-            "speakers_detected": speakers_detected
-        },
-        "words": extracted_words,
-    }
-
-    # 4. Save JSON
-    json_filename = video_path.stem + "_transcription.json"
-    json_path = output_dir / json_filename
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
-
-    print(f"[transcribe] Done! {len(extracted_words)} words in {elapsed}s")
-    if speakers_detected:
-        print(f"[transcribe]   -> {speakers_detected} speaker(s) detected")
-    print(f"[transcribe] JSON saved to: {json_path}")
-
-    return output
-
-
-# ─── CLI entrypoint ──────────────────────────────────────────
+# ─── CLI entrypoint (for quick testing) ──────────────────────────────────
 if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 2:
         print("Usage: python transcribe.py <video_path> [output_dir]")
+        print("  Set ELEVENLABS_API_KEY env var or pass via env.")
         sys.exit(1)
+
+    key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if not key:
+        print("ERROR: ELEVENLABS_API_KEY env var not set.")
+        sys.exit(2)
 
     video = sys.argv[1]
     out = sys.argv[2] if len(sys.argv) > 2 else None
-    result = transcribe_video(video, out)
+    result = transcribe_video(video, out, elevenlabs_api_key=key)
     print(json.dumps(result["metadata"], indent=2))

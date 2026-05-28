@@ -17,7 +17,6 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-import torch
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,9 +31,14 @@ from reframe_renderer import (
 )
 from silence_cutter import cut_silence, cut_video_segments
 from subtitle_generator import generate_ass, save_ass
-from transcribe import get_vram_usage, transcribe_video
+from transcribe import transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
 from refine import refine_video
+from settings import (
+    load_settings, save_settings,
+    test_elevenlabs_key, test_gemini_key,
+    add_model, remove_model,
+)
 
 # ─── Paths ───────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -245,21 +249,19 @@ class YtCutRequest(BaseModel):
 
 @app.get("/status")
 async def system_status():
-    """Return GPU, VRAM, and FFmpeg availability."""
-    gpu_info = {}
-    if torch.cuda.is_available():
-        gpu_info = {
-            "gpu_name": torch.cuda.get_device_name(0),
-            "cuda_available": True,
-            **get_vram_usage(),
-        }
-    else:
-        gpu_info = {"cuda_available": False}
-
+    """Return ElevenLabs/Gemini key + model availability and FFmpeg status."""
+    s = load_settings()
     return {
         "status": "ok",
-        "gpu": gpu_info,
         "ffmpeg": check_ffmpeg(),
+        "elevenlabs": {
+            "configured": bool(s.get("elevenlabs_api_key")),
+            "model": s.get("elevenlabs_model", "scribe_v1"),
+        },
+        "gemini": {
+            "configured": bool(s.get("gemini_api_key")),
+            "model": s.get("gemini_model", "gemini-2.0-flash"),
+        },
     }
 
 
@@ -1214,6 +1216,89 @@ async def get_refine_status(job_id: str):
     if job_id not in refine_jobs:
         raise HTTPException(status_code=404, detail="Refine job not found")
     return refine_jobs[job_id]
+
+
+# ─── Settings ───────────────────────────────────────────────
+
+
+class SettingsPatch(BaseModel):
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_model: Optional[str] = None
+    elevenlabs_models: Optional[list[str]] = None
+    gemini_api_key: Optional[str] = None
+    gemini_model: Optional[str] = None
+    gemini_models: Optional[list[str]] = None
+
+
+class TestKeyRequest(BaseModel):
+    api_key: str
+    model: Optional[str] = None
+
+
+class ModelMutation(BaseModel):
+    provider: str  # "elevenlabs" | "gemini"
+    model: str
+
+
+def _redact(s: dict) -> dict:
+    """Mask API keys before sending to client."""
+    out = dict(s)
+    for k in ("elevenlabs_api_key", "gemini_api_key"):
+        v = out.get(k) or ""
+        if v:
+            out[k] = "•" * 6 + v[-4:]
+            out[f"{k}_set"] = True
+        else:
+            out[f"{k}_set"] = False
+    return out
+
+
+@app.get("/settings")
+async def get_settings():
+    """Return the current settings (keys are redacted)."""
+    return _redact(load_settings())
+
+
+@app.put("/settings")
+async def update_settings(patch: SettingsPatch):
+    """Persist a partial settings patch."""
+    payload = {k: v for k, v in patch.model_dump().items() if v is not None}
+    saved = save_settings(payload)
+    return _redact(saved)
+
+
+@app.post("/settings/models/add")
+async def add_settings_model(req: ModelMutation):
+    try:
+        saved = add_model(req.provider, req.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _redact(saved)
+
+
+@app.post("/settings/models/remove")
+async def remove_settings_model(req: ModelMutation):
+    try:
+        saved = remove_model(req.provider, req.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _redact(saved)
+
+
+@app.post("/settings/test/elevenlabs")
+async def test_elevenlabs(req: TestKeyRequest):
+    """Test an ElevenLabs key. If api_key is empty, fall back to the saved one."""
+    key = req.api_key.strip() or load_settings().get("elevenlabs_api_key", "")
+    return test_elevenlabs_key(key)
+
+
+@app.post("/settings/test/gemini")
+async def test_gemini(req: TestKeyRequest):
+    """Test a Gemini key against a specific model."""
+    s = load_settings()
+    key = req.api_key.strip() or s.get("gemini_api_key", "")
+    model = (req.model or s.get("gemini_model") or "gemini-2.0-flash").strip()
+    return test_gemini_key(key, model)
 
 
 # ─── Static Files ──────────────────────────────────────────

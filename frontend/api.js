@@ -211,3 +211,68 @@ export async function pollRefineStatus(jobId) {
   const res = await fetch('/refine-status/' + jobId);
   return res.json();
 }
+
+// ── Settings ──────────────────────────────────────────────
+
+export async function fetchSettings() {
+  const res = await fetch('/settings');
+  if (!res.ok) throw new Error('Failed to load settings');
+  return res.json();
+}
+
+export async function updateSettings(patch) {
+  const res = await fetch('/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to save settings');
+  }
+  return res.json();
+}
+
+export async function addSettingsModel(provider, model) {
+  const res = await fetch('/settings/models/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, model }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to add model');
+  }
+  return res.json();
+}
+
+export async function removeSettingsModel(provider, model) {
+  const res = await fetch('/settings/models/remove', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider, model }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to remove model');
+  }
+  return res.json();
+}
+
+export async function testElevenlabsKey(apiKey) {
+  const res = await fetch('/settings/test/elevenlabs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey || '' }),
+  });
+  return res.json();
+}
+
+export async function testGeminiKey(apiKey, model) {
+  const res = await fetch('/settings/test/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey || '', model: model || null }),
+  });
+  return res.json();
+}

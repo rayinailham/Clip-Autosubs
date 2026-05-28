@@ -61,3 +61,4 @@ Thumbs.db
 
 # Sensitive credentials
 cookies.txt
+config/

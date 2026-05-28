@@ -37,12 +37,15 @@ export default {
     }
 
     function getDiarizeOpts() {
-      const opts = { transcription_model: store.transcriptionModel };
-      if (store.transcriptionModel === 'scribe_v2' && store.elevenlabsApiKey) {
+      const model = store.settings.elevenlabs_model || store.transcriptionModel || 'scribe_v1';
+      const opts = { transcription_model: model };
+      // Use stored ElevenLabs key when present (sent server-side too, but keep behaviour explicit).
+      if (store.settings.elevenlabs_api_key_set) {
+        // backend will fall back to the saved key when this is empty
+        opts.elevenlabs_api_key = '';
+      } else if (store.elevenlabsApiKey) {
         opts.elevenlabs_api_key = store.elevenlabsApiKey.trim();
       }
-      const token = (store.diarization.hfToken || '').trim();
-      if (token && store.transcriptionModel !== 'scribe_v2') opts.hf_token = token;
       const maxSp = store.diarization.maxSpeakers;
       if (maxSp && maxSp > 0) opts.max_speakers = maxSp;
       return opts;
