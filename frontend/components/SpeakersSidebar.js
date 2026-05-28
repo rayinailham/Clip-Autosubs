@@ -126,12 +126,22 @@ export default {
       <div v-for="spkId in uniqueSpeakers" :key="spkId" class="speaker-card">
         <div class="speaker-card-header">
           <span class="speaker-id-pill" :style="speakerColorPill(spkId)">{{ defaultLabel(spkId) }}</span>
-          <label class="speaker-toggle">
-            <input type="checkbox" v-model="entry(spkId).enabled" />
-            <span>Avatar + Box</span>
+        </div>
+
+        <div class="speaker-role-row">
+          <label class="speaker-role-opt" :class="{ active: !entry(spkId).enabled }">
+            <input type="radio" :name="'role-' + spkId" :checked="!entry(spkId).enabled" @change="entry(spkId).enabled = false" />
+            <span class="role-label">Main</span>
+            <span class="role-desc">Default subtitle (bottom center)</span>
+          </label>
+          <label class="speaker-role-opt" :class="{ active: entry(spkId).enabled }">
+            <input type="radio" :name="'role-' + spkId" :checked="entry(spkId).enabled" @change="entry(spkId).enabled = true" />
+            <span class="role-label">Sub</span>
+            <span class="role-desc">Avatar + dialog box</span>
           </label>
         </div>
 
+        <div v-if="entry(spkId).enabled">
         <div class="speaker-row">
           <label>Label</label>
           <input type="text"
@@ -209,6 +219,7 @@ export default {
           <button class="btn btn-outline btn-sm" @click="applyToAll('box_scale', spkId)" title="Copy box scale to other speakers">Copy Box Scale →</button>
           <button class="btn btn-outline btn-sm" @click="applyToAll('avatar_size', spkId)" title="Copy avatar size to other speakers">Copy Avatar Size →</button>
         </div>
+        </div><!-- /v-if sub config -->
       </div>
     </div>
   `,
