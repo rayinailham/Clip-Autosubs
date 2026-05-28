@@ -225,8 +225,8 @@ export default {
         regenerateAutoGroups();
       }
 
-      // Apply dynamic subtitle preset
-      store.useDynamicMode = true;
+      // Apply static subtitle preset
+      store.useDynamicMode = false;
       store.style.animation = 'color-only';
       store.style.groupAnimation = 'pop-in';
 

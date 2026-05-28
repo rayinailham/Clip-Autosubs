@@ -93,7 +93,7 @@ export default {
       if (result && result.groups && result.groups.length > 0) {
         store.customGroups = result.groups;
         store.useCustomGroups = true;
-        store.useDynamicMode = true;
+        store.useDynamicMode = false;
       } else {
         regenerateAutoGroups();
       }

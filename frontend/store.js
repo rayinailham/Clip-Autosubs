@@ -49,7 +49,7 @@ const store = reactive({
   useCustomGroups: false,
 
   // ── Mode ────────────────────────────────
-  useDynamicMode: true,
+  useDynamicMode: false,
 
   // ── Undo / Redo ─────────────────────────
   undoStack: [],
