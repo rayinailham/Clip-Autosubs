@@ -41,7 +41,12 @@ export default {
       }
     });
 
-    function openSettings() { store.appMode = 'settings'; }
+    function openSettings() {
+      if (store.appMode !== 'settings') {
+        store.previousAppMode = store.appMode;
+      }
+      store.appMode = 'settings';
+    }
 
     return { store, openSettings };
   },

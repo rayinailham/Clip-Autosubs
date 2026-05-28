@@ -7,6 +7,7 @@ import { reactive } from 'vue';
 const store = reactive({
   // ── App Mode ─────────────────────────────
   appMode: 'home', // 'home' | 'subtitle' | 'vtuber' | 'ytclipper' | 'settings'
+  previousAppMode: 'home', // last non-settings mode, used by Settings back button
 
   // ── Navigation ──────────────────────────
   currentView: 'upload', // 'upload' | 'editor'

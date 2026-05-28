@@ -218,11 +218,12 @@ def _extract_via_transcript_api(url: str) -> dict:
     }
 
 
-def extract_transcript(url: str) -> dict:
+def extract_transcript(url: str, progress_cb=None) -> dict:
     """
     Use yt-dlp to pull CC / auto-captions from a YouTube URL.
     Includes retry logic for 429 rate-limit errors and a fallback to
     youtube_transcript_api if yt-dlp keeps failing.
+    progress_cb(stage: str, info: dict) — optional callback for stage updates.
 
     Returns:
         {
@@ -237,6 +238,11 @@ def extract_transcript(url: str) -> dict:
     if not YT_DLP_AVAILABLE:
         raise RuntimeError("yt-dlp is not installed. Run: pip install yt-dlp")
 
+    def _emit(stage, **info):
+        if progress_cb:
+            try: progress_cb(stage, info)
+            except Exception: pass
+
     max_retries = 3
     last_error = None
 
@@ -246,9 +252,10 @@ def extract_transcript(url: str) -> dict:
                 # Try cookies in priority order until one succeeds at getting info
                 info = None
                 cookie_opts = _get_cookie_opts_list()
-                
+
                 for c_idx, cookie_opt in enumerate(cookie_opts):
                     try:
+                        _emit("metadata", attempt=attempt, cookie_idx=c_idx)
                         # 1. Fetch metadata without subtitles to get original video language
                         meta_opts = {
                             "skip_download": True,
@@ -260,8 +267,24 @@ def extract_transcript(url: str) -> dict:
                         with yt_dlp.YoutubeDL(meta_opts) as ydl:
                             info = ydl.extract_info(url, download=False)
                             video_lang = info.get("language") or "en"
-                            
+
+                        _emit("metadata_done",
+                              title=info.get("title", ""),
+                              duration=float(info.get("duration") or 0),
+                              lang=video_lang)
+
                         # 2. Download ONLY the original language transcript
+                        def _sub_hook(d):
+                            st = d.get("status")
+                            if st == "downloading":
+                                _emit("downloading_subs",
+                                      bytes=d.get("downloaded_bytes", 0),
+                                      total=d.get("total_bytes") or d.get("total_bytes_estimate"),
+                                      speed=d.get("speed"))
+                            elif st == "finished":
+                                _emit("subs_downloaded",
+                                      bytes=d.get("downloaded_bytes", 0))
+
                         ydl_opts = {
                             "skip_download": True,
                             "writesubtitles": True,
@@ -273,6 +296,8 @@ def extract_transcript(url: str) -> dict:
                             "no_warnings": True,
                             "logger": _SilentLogger(),
                             "sleep_interval_subtitles": 2,
+                            "concurrent_fragment_downloads": 5,
+                            "progress_hooks": [_sub_hook],
                         }
                         ydl_opts.update(cookie_opt)
 
@@ -283,7 +308,9 @@ def extract_transcript(url: str) -> dict:
                         is_rate_limit = "429" in str(loop_e) or "Too Many Requests" in str(loop_e)
                         if is_rate_limit or c_idx == len(cookie_opts) - 1:
                             raise loop_e  # Hit 429 or last resort failed, let outer block catch it
-                
+
+
+                _emit("parsing_subs")
 
                 # Identify the best subtitle file from the temp dir
                 video_id = info.get("id", "unknown")
@@ -391,19 +418,34 @@ _HYPE_RE = re.compile(
 )
 
 
-def fetch_chat_replay(url: str) -> list[dict]:
+def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
     """
     Pull live-chat replay JSONL via yt-dlp. Returns [{t: float_seconds, text: str}, ...].
     Returns [] silently if no chat replay (regular VOD, premieres without chat, etc).
+    progress_cb(stage: str, info: dict) — optional callback for stage updates.
     """
     if not YT_DLP_AVAILABLE:
         return []
+
+    def _emit(stage, **info):
+        if progress_cb:
+            try: progress_cb(stage, info)
+            except Exception: pass
 
     msgs = []
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
             for cookie_opt in _get_cookie_opts_list():
                 try:
+                    def _hook(d):
+                        st = d.get("status")
+                        if st == "downloading":
+                            _emit("downloading",
+                                  bytes=d.get("downloaded_bytes", 0),
+                                  total=d.get("total_bytes") or d.get("total_bytes_estimate"),
+                                  speed=d.get("speed"))
+                        elif st == "finished":
+                            _emit("downloaded", bytes=d.get("downloaded_bytes", 0))
                     ydl_opts = {
                         "skip_download": True,
                         "writesubtitles": True,
@@ -413,8 +455,11 @@ def fetch_chat_replay(url: str) -> list[dict]:
                         "quiet": True,
                         "no_warnings": True,
                         "logger": _SilentLogger(),
+                        "progress_hooks": [_hook],
+                        "concurrent_fragment_downloads": 5,
                     }
                     ydl_opts.update(cookie_opt)
+                    _emit("starting", cookie=bool(cookie_opt))
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.extract_info(url, download=True)
                     break
@@ -425,7 +470,10 @@ def fetch_chat_replay(url: str) -> list[dict]:
             chat_files = sorted(tmp_path.glob("*.live_chat.json"))
             if not chat_files:
                 print("[yt-clipper] No live-chat replay available (skipping hype signal).")
+                _emit("no_chat")
                 return []
+
+            _emit("parsing", file=str(chat_files[0].name))
 
             for line in chat_files[0].read_text(encoding="utf-8").splitlines():
                 line = line.strip()

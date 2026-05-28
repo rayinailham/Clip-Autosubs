@@ -13,14 +13,20 @@ Provides:
 
 import json
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from logger import get_logger
+
+log = get_logger("app")
+http_log = get_logger("http")
 
 from renderer import check_ffmpeg, get_video_info, render_video, cut_video_segments
 from reframe_renderer import (
@@ -52,6 +58,50 @@ RENDERED_DIR.mkdir(exist_ok=True)
 
 # ─── App ─────────────────────────────────────────────────────
 app = FastAPI(title="Clipping Project", version="2.0.0")
+
+
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    """Log every HTTP request with method, path, status, latency."""
+    # Skip noisy static asset polling.
+    path = request.url.path
+    is_static = (
+        path.startswith("/assets/")
+        or path.startswith("/uploads/")
+        or path.startswith("/video/")
+        or path.startswith("/rendered/")
+        or path.endswith((".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff", ".woff2"))
+    )
+    t0 = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        ms = (time.perf_counter() - t0) * 1000
+        http_log.exception("[fail]%s[/]  %s  -> 500  (%.0fms)  %s",
+                           f" {request.method} ", path, ms, e)
+        raise
+    ms = (time.perf_counter() - t0) * 1000
+    if not is_static:
+        status = response.status_code
+        style = "ok" if status < 400 else "fail"
+        http_log.info("[%s]%s[/] %-6s %s -> %d  (%.0fms)",
+                      style, "", request.method, path, status, ms)
+    return response
+
+
+@app.on_event("startup")
+async def _on_startup():
+    log.info("FastAPI startup complete — all routes ready.")
+    log.info("Uploads:  %s", UPLOAD_DIR)
+    log.info("Outputs:  %s", OUTPUT_DIR)
+    log.info("Rendered: %s", RENDERED_DIR)
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    log.warning("FastAPI shutdown — draining %d render / %d reframe / %d trim / %d refine / %d yt jobs",
+                len(render_jobs), len(reframe_jobs), len(trim_jobs),
+                len(refine_jobs), len(yt_analyze_jobs) + len(yt_cut_jobs))
 
 ALLOWED_EXTENSIONS = {
     ".mp4", ".mkv", ".avi", ".mov", ".webm",
@@ -406,7 +456,7 @@ def _do_render(render_id: str, req: RenderRequest):
         actual_video_path = video_path
         if req.active_segments and len(req.active_segments) > 0:
             render_jobs[render_id]["status"] = "cutting_segments"
-            print(f"[render] Cutting {len(req.active_segments)} active segments…")
+            log.info("render %s — cutting %d active segments", render_id, len(req.active_segments))
 
             segments_tuples = [(s[0], s[1]) for s in req.active_segments]
             temp_cut_path = RENDERED_DIR / f"{render_id}_temp_cut.mp4"
@@ -486,7 +536,7 @@ def _do_render(render_id: str, req: RenderRequest):
         }
 
     except Exception as e:
-        print(f"[render] Error: {e}")
+        log.exception("render %s failed: %s", render_id, e)
         render_jobs[render_id] = {"status": "error", "error": str(e)}
     finally:
         # Clean up temporary cut file
@@ -826,7 +876,7 @@ def _do_reframe(job_id: str, req: ReframeRequest):
         }
 
     except Exception as e:
-        print(f"[reframe] Error: {e}")
+        log.exception("reframe %s failed: %s", job_id, e)
         reframe_jobs[job_id] = {"status": "error", "error": str(e)}
 
 
@@ -853,10 +903,10 @@ def _do_trim(job_id: str, req: TrimRequest):
     """Background task: trim video to [trim_start, trim_end] using FFmpeg."""
     logs: list[str] = []
 
-    def log(msg: str):
+    def log_msg(msg: str):
         logs.append(msg)
         trim_jobs[job_id]["log"] = msg
-        print(f"[trim] {msg}")
+        log.info("trim %s — %s", job_id, msg)
 
     try:
         video_path = UPLOAD_DIR / req.video_filename
@@ -943,7 +993,7 @@ def _do_trim(job_id: str, req: TrimRequest):
         }
 
     except Exception as e:
-        print(f"[trim] Error: {e}")
+        log.exception("trim %s failed: %s", job_id, e)
         trim_jobs[job_id] = {"status": "error", "error": str(e)}
 
 
@@ -970,30 +1020,109 @@ async def get_trim_status(job_id: str):
 def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                    use_chat_signal: bool = True, include_setup: bool = True):
     """Background task: extract transcript + optional chat-hype + Gemini analysis."""
+    import time as _time
+    t0 = _time.time()
+    def _elapsed():
+        return int(_time.time() - t0)
     try:
-        yt_analyze_jobs[job_id] = {"status": "extracting", "message": "Extracting captions from YouTube…"}
-        transcript_data = extract_transcript(url)
+        yt_analyze_jobs[job_id] = {
+            "status": "extracting",
+            "message": "Extracting captions from YouTube…",
+            "elapsed": _elapsed(),
+        }
+
+        def _tx_progress(stage: str, info: dict):
+            if stage == "metadata":
+                msg = "Fetching video metadata…"
+            elif stage == "metadata_done":
+                title = info.get("title") or ""
+                dur = info.get("duration") or 0
+                lang = info.get("lang") or "?"
+                msg = f"Metadata ready — {title[:60]} ({int(dur)}s, lang={lang})"
+            elif stage == "downloading_subs":
+                b = info.get("bytes") or 0
+                total = info.get("total")
+                mb = b / (1024 * 1024)
+                if total:
+                    tot_mb = total / (1024 * 1024)
+                    pct = (b / total) * 100 if total else 0
+                    msg = f"Downloading captions… {mb:.2f}/{tot_mb:.2f} MB ({pct:.0f}%)"
+                else:
+                    msg = f"Downloading captions… {mb:.2f} MB"
+            elif stage == "subs_downloaded":
+                b = info.get("bytes") or 0
+                msg = f"Captions downloaded ({b / (1024*1024):.2f} MB)"
+            elif stage == "parsing_subs":
+                msg = "Parsing captions…"
+            else:
+                msg = f"Captions: {stage}"
+            yt_analyze_jobs[job_id] = {
+                "status": "extracting",
+                "message": msg,
+                "elapsed": _elapsed(),
+            }
+
+        transcript_data = extract_transcript(url, progress_cb=_tx_progress)
 
         chat_buckets = None
         if use_chat_signal:
             yt_analyze_jobs[job_id] = {
                 "status": "chat",
                 "message": "Fetching live-chat replay for hype signal…",
+                "elapsed": _elapsed(),
             }
             try:
                 from yt_clipper import fetch_chat_replay, bucket_chat
-                chat_msgs = fetch_chat_replay(url)
+
+                def _chat_progress(stage: str, info: dict):
+                    if stage == "starting":
+                        msg = "Connecting to YouTube for chat replay…"
+                    elif stage == "downloading":
+                        b = info.get("bytes") or 0
+                        total = info.get("total")
+                        mb = b / (1024 * 1024)
+                        if total:
+                            tot_mb = total / (1024 * 1024)
+                            pct = (b / total) * 100 if total else 0
+                            msg = f"Downloading chat replay… {mb:.1f}/{tot_mb:.1f} MB ({pct:.0f}%)"
+                        else:
+                            msg = f"Downloading chat replay… {mb:.1f} MB"
+                    elif stage == "downloaded":
+                        b = info.get("bytes") or 0
+                        msg = f"Chat replay downloaded ({b / (1024*1024):.1f} MB), parsing…"
+                    elif stage == "parsing":
+                        msg = "Parsing chat messages…"
+                    elif stage == "no_chat":
+                        msg = "No chat replay available, skipping hype signal."
+                    else:
+                        msg = f"Chat: {stage}"
+                    yt_analyze_jobs[job_id] = {
+                        "status": "chat",
+                        "message": msg,
+                        "elapsed": _elapsed(),
+                    }
+
+                chat_msgs = fetch_chat_replay(url, progress_cb=_chat_progress)
                 if chat_msgs:
+                    yt_analyze_jobs[job_id] = {
+                        "status": "chat",
+                        "message": f"Bucketing {len(chat_msgs)} chat messages…",
+                        "elapsed": _elapsed(),
+                    }
                     chat_buckets = bucket_chat(
                         chat_msgs,
                         transcript_data["video_duration"],
                         bucket_size=15.0,
                     )
             except Exception as chat_err:
-                print(f"[yt-analyze] Chat signal skipped: {chat_err}")
+                log.warning("yt-analyze %s — chat signal skipped: %s", job_id, chat_err)
                 chat_buckets = None
 
-        yt_analyze_jobs[job_id] = {"status": "analyzing", "message": "Sending transcript to Gemini AI…"}
+        yt_analyze_jobs[job_id] = {
+            "status": "analyzing",
+            "message": "Sending transcript to Gemini AI…",
+            "elapsed": _elapsed(),
+        }
         clips = analyze_with_gemini(
             transcript_data,
             criteria,
@@ -1008,16 +1137,24 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
             "video_title": transcript_data["video_title"],
             "video_duration": transcript_data["video_duration"],
             "clips": clips,
+            "elapsed": _elapsed(),
         }
     except Exception as e:
-        print(f"[yt-analyze] Error: {e}")
-        yt_analyze_jobs[job_id] = {"status": "error", "message": str(e)}
+        log.exception("yt-analyze %s failed: %s", job_id, e)
+        yt_analyze_jobs[job_id] = {
+            "status": "error",
+            "message": str(e),
+            "elapsed": _elapsed(),
+        }
 
 
 @app.post("/yt-clip/analyze")
 async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTasks):
     """Start background job: extract YT captions → Gemini analysis → proposed clips."""
-    if not req.gemini_api_key.strip():
+    api_key = req.gemini_api_key.strip()
+    if not api_key:
+        api_key = (load_settings().get("gemini_api_key") or "").strip()
+    if not api_key:
         raise HTTPException(status_code=400, detail="Gemini API key is required.")
     job_id = uuid.uuid4().hex[:8]
     yt_analyze_jobs[job_id] = {"status": "queued", "message": "Queued…"}
@@ -1026,7 +1163,7 @@ async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTas
         job_id,
         req.url,
         req.criteria,
-        req.gemini_api_key.strip(),
+        api_key,
         req.use_chat_signal,
         req.include_setup,
     )
@@ -1065,7 +1202,7 @@ def _do_yt_cut(job_id: str, url: str, clips: list[dict]):
             "clips": results,
         }
     except Exception as e:
-        print(f"[yt-cut] Error: {e}")
+        log.exception("yt-cut %s failed: %s", job_id, e)
         yt_cut_jobs[job_id] = {"status": "error", "message": str(e), "progress": 0, "clips": []}
 
 
@@ -1140,9 +1277,9 @@ def _do_refine(job_id: str, req: RefineRequest):
             with open(tx_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False)
         except Exception as e:
-            print(f"[refine] Failed to save JSON: {e}")
+            log.warning("refine %s — failed to save JSON: %s", job_id, e)
     except Exception as e:
-        print(f"[refine] Error: {e}")
+        log.exception("refine %s failed: %s", job_id, e)
         import traceback
         traceback.print_exc()
         refine_jobs[job_id] = {"status": "error", "error": str(e)}
@@ -1241,9 +1378,11 @@ async def remove_settings_model(req: ModelMutation):
 
 @app.post("/settings/test/elevenlabs")
 async def test_elevenlabs(req: TestKeyRequest):
-    """Test an ElevenLabs key. If api_key is empty, fall back to the saved one."""
-    key = req.api_key.strip() or load_settings().get("elevenlabs_api_key", "")
-    return test_elevenlabs_key(key)
+    """Test an ElevenLabs key (and optional model). Falls back to saved values."""
+    s = load_settings()
+    key = req.api_key.strip() or s.get("elevenlabs_api_key", "")
+    model = (req.model or s.get("elevenlabs_model") or "").strip() or None
+    return test_elevenlabs_key(key, model)
 
 
 @app.post("/settings/test/gemini")

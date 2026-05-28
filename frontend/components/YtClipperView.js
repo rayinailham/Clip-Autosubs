@@ -5,6 +5,21 @@ import {
   ytCut, ytPollCut,
 } from '../api.js';
 
+const SESSION_KEY = 'ytclipper.session.v1';
+
+function saveSession(snap) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(snap)); } catch (_) {}
+}
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+}
+
 // â”€â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function fmtSeconds(s) {
   const h = Math.floor(s / 3600);
@@ -37,6 +52,8 @@ export default {
 
     const analyzeStatus = ref('idle'); // idle | running | done | error
     const analyzeMessage = ref('');
+    const analyzeStage = ref('');
+    const analyzeElapsed = ref(0);
     const analyzeJobId = ref('');
     const videoTitle = ref('');
     const videoDuration = ref(0);
@@ -50,6 +67,50 @@ export default {
 
     let analyzePollTimer = null;
     let cutPollTimer = null;
+
+    // ── session persistence ──────────────────
+    function fmtElapsed(s) {
+      s = Math.max(0, Math.floor(s || 0));
+      const m = Math.floor(s / 60);
+      const sec = s % 60;
+      if (m > 0) return `${m}m ${sec}s`;
+      return `${sec}s`;
+    }
+    const stageLabel = computed(() => {
+      switch (analyzeStage.value) {
+        case 'queued': return 'Queued';
+        case 'extracting': return 'Extracting captions';
+        case 'chat': return 'Live chat';
+        case 'analyzing': return 'Gemini analysis';
+        case 'done': return 'Done';
+        case 'error': return 'Error';
+        default: return analyzeStage.value || '';
+      }
+    });
+
+    function snapshot() {
+      return {
+        url: url.value,
+        criteria: criteria.value,
+        useChatSignal: useChatSignal.value,
+        includeSetup: includeSetup.value,
+        analyzeStatus: analyzeStatus.value,
+        analyzeMessage: analyzeMessage.value,
+        analyzeStage: analyzeStage.value,
+        analyzeElapsed: analyzeElapsed.value,
+        analyzeJobId: analyzeJobId.value,
+        videoTitle: videoTitle.value,
+        videoDuration: videoDuration.value,
+        proposedClips: proposedClips.value,
+        cutStatus: cutStatus.value,
+        cutMessage: cutMessage.value,
+        cutProgress: cutProgress.value,
+        cutJobId: cutJobId.value,
+        doneClips: doneClips.value,
+        ts: Date.now(),
+      };
+    }
+    function persist() { saveSession(snapshot()); }
 
     // â”€â”€ computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const selectedClips = computed(() => proposedClips.value.filter(c => c.selected));
@@ -82,6 +143,7 @@ export default {
       videoTitle.value = '';
       cutStatus.value = 'idle';
       doneClips.value = [];
+      persist();
 
       try {
         const res = await ytAnalyze(url.value.trim(), criteria.value.trim(), effectiveKey.value, {
@@ -89,10 +151,12 @@ export default {
           includeSetup: includeSetup.value,
         });
         analyzeJobId.value = res.job_id;
+        persist();
         _pollAnalyze();
       } catch (e) {
         analyzeStatus.value = 'error';
         analyzeMessage.value = e.message;
+        persist();
       }
     }
 
@@ -101,6 +165,8 @@ export default {
         try {
           const data = await ytPollAnalyze(analyzeJobId.value);
           analyzeMessage.value = data.message;
+          analyzeStage.value = data.status || '';
+          if (typeof data.elapsed === 'number') analyzeElapsed.value = data.elapsed;
 
           if (data.status === 'done') {
             clearInterval(analyzePollTimer);
@@ -108,20 +174,26 @@ export default {
             videoTitle.value = data.video_title;
             videoDuration.value = data.video_duration;
             proposedClips.value = (data.clips || []).map(c => ({ ...c, selected: true }));
+            persist();
           } else if (data.status === 'error') {
             clearInterval(analyzePollTimer);
             analyzeStatus.value = 'error';
+            persist();
+          } else {
+            persist();
           }
         } catch (e) {
           clearInterval(analyzePollTimer);
           analyzeStatus.value = 'error';
           analyzeMessage.value = e.message;
+          persist();
         }
       }, 2000);
     }
 
     function toggleAll(val) {
       proposedClips.value.forEach(c => (c.selected = val));
+      persist();
     }
 
     // â”€â”€ cut â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -131,6 +203,7 @@ export default {
       cutMessage.value = 'Starting...';
       cutProgress.value = 0;
       doneClips.value = [];
+      persist();
 
       const clipsPayload = selectedClips.value.map(c => ({
         id: c.id,
@@ -143,10 +216,12 @@ export default {
       try {
         const res = await ytCut(url.value.trim(), clipsPayload);
         cutJobId.value = res.job_id;
+        persist();
         _pollCut();
       } catch (e) {
         cutStatus.value = 'error';
         cutMessage.value = e.message;
+        persist();
       }
     }
 
@@ -161,14 +236,19 @@ export default {
             clearInterval(cutPollTimer);
             cutStatus.value = 'done';
             doneClips.value = data.clips || [];
+            persist();
           } else if (data.status === 'error') {
             clearInterval(cutPollTimer);
             cutStatus.value = 'error';
+            persist();
+          } else {
+            persist();
           }
         } catch (e) {
           clearInterval(cutPollTimer);
           cutStatus.value = 'error';
           cutMessage.value = e.message;
+          persist();
         }
       }, 2000);
     }
@@ -194,18 +274,54 @@ export default {
       criteria.value = '';
       analyzeStatus.value = 'idle';
       analyzeMessage.value = '';
+      analyzeJobId.value = '';
       proposedClips.value = [];
       cutStatus.value = 'idle';
       cutMessage.value = '';
+      cutProgress.value = 0;
+      cutJobId.value = '';
       doneClips.value = [];
+      clearSession();
     }
+
+    // ── restore prior session on mount ────────
+    onMounted(() => {
+      const s = loadSession();
+      if (!s) return;
+      url.value = s.url || '';
+      criteria.value = s.criteria || '';
+      if (typeof s.useChatSignal === 'boolean') useChatSignal.value = s.useChatSignal;
+      if (typeof s.includeSetup === 'boolean') includeSetup.value = s.includeSetup;
+      analyzeStatus.value = s.analyzeStatus || 'idle';
+      analyzeMessage.value = s.analyzeMessage || '';
+      analyzeStage.value = s.analyzeStage || '';
+      analyzeElapsed.value = s.analyzeElapsed || 0;
+      analyzeJobId.value = s.analyzeJobId || '';
+      videoTitle.value = s.videoTitle || '';
+      videoDuration.value = s.videoDuration || 0;
+      proposedClips.value = s.proposedClips || [];
+      cutStatus.value = s.cutStatus || 'idle';
+      cutMessage.value = s.cutMessage || '';
+      cutProgress.value = s.cutProgress || 0;
+      cutJobId.value = s.cutJobId || '';
+      doneClips.value = s.doneClips || [];
+
+      // Resume polling if jobs were mid-flight
+      if (analyzeStatus.value === 'running' && analyzeJobId.value) {
+        _pollAnalyze();
+      }
+      if (cutStatus.value === 'running' && cutJobId.value) {
+        _pollCut();
+      }
+    });
 
     return {
       url, criteria,
       geminiKeyOverride, showKeyOverride, hasKey,
       useChatSignal, includeSetup,
       store,
-      analyzeStatus, analyzeMessage, videoTitle, videoDuration, proposedClips,
+      analyzeStatus, analyzeMessage, analyzeStage, analyzeElapsed, stageLabel, fmtElapsed,
+      videoTitle, videoDuration, proposedClips,
       cutStatus, cutMessage, cutProgress, doneClips,
       selectedClips, canAnalyze, canCut,
       startAnalyze, startCut,
@@ -325,8 +441,21 @@ export default {
 
     <!-- Analysis progress -->
     <div v-if="analyzeStatus === 'running'" class="ytc-card ytc-status-card ytc-status--running">
-      <div class="ytc-spinner"></div>
-      <p class="ytc-status-msg">{{ analyzeMessage }}</p>
+      <div class="ytc-progress-head">
+        <div class="ytc-spinner"></div>
+        <div class="ytc-progress-text">
+          <div class="ytc-progress-stage">
+            <span class="ytc-stage-label">{{ stageLabel }}</span>
+            <span class="ytc-stage-elapsed">{{ fmtElapsed(analyzeElapsed) }}</span>
+          </div>
+          <p class="ytc-status-msg">{{ analyzeMessage }}</p>
+        </div>
+      </div>
+      <div class="ytc-stages">
+        <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'extracting', done: ['chat','analyzing','done'].includes(analyzeStage) }">1. Captions</span>
+        <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'chat', done: ['analyzing','done'].includes(analyzeStage), skipped: !useChatSignal }">2. Live chat</span>
+        <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'analyzing', done: analyzeStage === 'done' }">3. Gemini</span>
+      </div>
     </div>
     <div v-if="analyzeStatus === 'error'" class="ytc-card ytc-status-card ytc-status--error">
       <p>&#x274C; {{ analyzeMessage }}</p>

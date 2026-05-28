@@ -81,14 +81,25 @@ export default {
     async function runElevenTest() {
       elevenTest.value = { state: 'running', text: 'Testing…' };
       try {
-        const res = await testElevenlabsKey(elevenKeyDirty.value ? elevenKey.value.trim() : '');
+        const res = await testElevenlabsKey(
+          elevenKeyDirty.value ? elevenKey.value.trim() : '',
+          store.settings.elevenlabs_model,
+        );
         if (res.ok) {
           elevenTest.value = {
             state: 'ok',
-            text: `OK${res.subscription ? ' · ' + res.subscription : ''}`,
+            text: `Key OK · model "${res.model || store.settings.elevenlabs_model}" available${res.subscription ? ' · ' + res.subscription : ''}`,
+          };
+        } else if (res.reason === 'model') {
+          elevenTest.value = {
+            state: 'error',
+            text: `Key works, but model is the problem → ${res.error || 'model unavailable'}`,
           };
         } else {
-          elevenTest.value = { state: 'error', text: res.error || 'Failed' };
+          elevenTest.value = {
+            state: 'error',
+            text: `Key rejected → ${res.error || 'Failed'}`,
+          };
         }
       } catch (e) {
         elevenTest.value = { state: 'error', text: e.message };
@@ -105,10 +116,18 @@ export default {
         if (res.ok) {
           geminiTest.value = {
             state: 'ok',
-            text: `OK · ${res.model}${res.sample ? ' · "' + res.sample + '"' : ''}`,
+            text: `Key OK · model "${res.model}"${res.sample ? ' · "' + res.sample + '"' : ''}`,
+          };
+        } else if (res.reason === 'model') {
+          geminiTest.value = {
+            state: 'error',
+            text: `Key works, but model is the problem → ${res.error || 'model unavailable'}`,
           };
         } else {
-          geminiTest.value = { state: 'error', text: res.error || 'Failed' };
+          geminiTest.value = {
+            state: 'error',
+            text: `Key rejected → ${res.error || 'Failed'}`,
+          };
         }
       } catch (e) {
         geminiTest.value = { state: 'error', text: e.message };
@@ -173,7 +192,10 @@ export default {
 
     function onElevenKeyInput() { elevenKeyDirty.value = true; }
     function onGeminiKeyInput() { geminiKeyDirty.value = true; }
-    function goHome() { store.appMode = 'home'; }
+    function goHome() {
+      const prev = store.previousAppMode || 'home';
+      store.appMode = prev;
+    }
 
     return {
       store, s,

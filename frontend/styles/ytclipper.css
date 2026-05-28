@@ -173,17 +173,69 @@
 /* ── Status Card ─────────────────────────────── */
 .ytc-status-card {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 12px;
   min-height: 64px;
 }
 
 .ytc-status--running { border-color: var(--accent); }
 .ytc-status--error   { border-color: var(--error); background: rgba(255,107,107,0.05); }
 
+.ytc-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.ytc-progress-text { flex: 1; min-width: 0; }
+.ytc-progress-stage {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+.ytc-stage-label {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.ytc-stage-elapsed {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .ytc-status-msg {
   font-size: 0.9rem;
   color: var(--text-dim);
+  margin: 0;
+}
+
+.ytc-stages {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ytc-stage-pip {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-elev, rgba(255,255,255,0.04));
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+.ytc-stage-pip.active {
+  background: rgba(217, 255, 61, 0.12);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ytc-stage-pip.done {
+  color: #4CAF50;
+  border-color: rgba(76, 175, 80, 0.4);
+}
+.ytc-stage-pip.skipped {
+  opacity: 0.45;
+  text-decoration: line-through;
 }
 
 /* Spinner */
