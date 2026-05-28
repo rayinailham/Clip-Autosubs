@@ -439,3 +439,49 @@
   background: linear-gradient(135deg, #cc0000, #dd5500);
   transform: translateY(-1px);
 }
+
+/* ── Advanced toggles (chat signal / story setup) ───────────── */
+.ytc-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.65rem 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.ytc-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+  color: var(--text);
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+}
+
+.ytc-toggle input[type="checkbox"] {
+  margin-top: 3px;
+  flex-shrink: 0;
+  accent-color: #ff6400;
+  cursor: pointer;
+}
+
+.ytc-toggle span {
+  display: block;
+}
+
+.ytc-toggle .ytc-hint-text {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.ytc-toggle input:disabled,
+.ytc-toggle input:disabled + span {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

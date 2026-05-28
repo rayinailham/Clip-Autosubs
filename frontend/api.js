@@ -72,24 +72,6 @@ export async function pollRenderStatus(renderId) {
   return res.json();
 }
 
-export async function startCutSilenceJob(payload) {
-  const res = await fetch('/cut-silence', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || 'Cut silence request failed');
-  }
-  return res.json();
-}
-
-export async function pollCutSilenceStatus(jobId) {
-  const res = await fetch('/cut-silence-status/' + jobId);
-  return res.json();
-}
-
 export async function deleteUpload(filename) {
   const res = await fetch('/uploads/' + encodeURIComponent(filename), { method: 'DELETE' });
   if (!res.ok) {
@@ -136,11 +118,21 @@ export async function pollReframeStatus(jobId) {
 
 // ── YouTube Clip Finder ──────────────────────────────────────
 
-export async function ytAnalyze(url, criteria, geminiApiKey) {
+export async function ytAnalyze(url, criteria, geminiApiKey, opts = {}) {
+  const {
+    useChatSignal = true,
+    includeSetup = true,
+  } = opts;
   const res = await fetch('/yt-clip/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, criteria, gemini_api_key: geminiApiKey }),
+    body: JSON.stringify({
+      url,
+      criteria,
+      gemini_api_key: geminiApiKey,
+      use_chat_signal: useChatSignal,
+      include_setup: includeSetup,
+    }),
   });
   if (!res.ok) {
     const err = await res.json();

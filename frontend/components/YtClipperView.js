@@ -31,6 +31,10 @@ export default {
     const geminiKeyOverride = ref('');
     const showKeyOverride = ref(false);
 
+    // Advanced clipping signals
+    const useChatSignal = ref(true);
+    const includeSetup = ref(true);
+
     const analyzeStatus = ref('idle'); // idle | running | done | error
     const analyzeMessage = ref('');
     const analyzeJobId = ref('');
@@ -80,7 +84,10 @@ export default {
       doneClips.value = [];
 
       try {
-        const res = await ytAnalyze(url.value.trim(), criteria.value.trim(), effectiveKey.value);
+        const res = await ytAnalyze(url.value.trim(), criteria.value.trim(), effectiveKey.value, {
+          useChatSignal: useChatSignal.value,
+          includeSetup: includeSetup.value,
+        });
         analyzeJobId.value = res.job_id;
         _pollAnalyze();
       } catch (e) {
@@ -196,6 +203,7 @@ export default {
     return {
       url, criteria,
       geminiKeyOverride, showKeyOverride, hasKey,
+      useChatSignal, includeSetup,
       store,
       analyzeStatus, analyzeMessage, videoTitle, videoDuration, proposedClips,
       cutStatus, cutMessage, cutProgress, doneClips,
@@ -275,6 +283,31 @@ export default {
           placeholder="e.g. funny moments, key insights, emotional moments, top 5 highlights..."
           :disabled="analyzeStatus === 'running'"
         />
+      </div>
+
+      <div class="ytc-field ytc-toggles">
+        <label class="ytc-toggle">
+          <input
+            type="checkbox"
+            v-model="useChatSignal"
+            :disabled="analyzeStatus === 'running'"
+          />
+          <span>
+            Use live-chat hype signal
+            <span class="ytc-hint-text">&ndash; weighs chat laughter & spikes (auto-skipped if no chat replay)</span>
+          </span>
+        </label>
+        <label class="ytc-toggle">
+          <input
+            type="checkbox"
+            v-model="includeSetup"
+            :disabled="analyzeStatus === 'running'"
+          />
+          <span>
+            Include story setup (lead-in)
+            <span class="ytc-hint-text">&ndash; walks clip start back &le;120s to nearest setup line, never past first spoken line</span>
+          </span>
+        </label>
       </div>
 
       <div class="ytc-action-row">

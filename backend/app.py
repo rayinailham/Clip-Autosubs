@@ -22,14 +22,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from renderer import check_ffmpeg, get_video_info, render_video
+from renderer import check_ffmpeg, get_video_info, render_video, cut_video_segments
 from reframe_renderer import (
     render_vtuber_short,
     render_shorts_zoomed,
     render_shorts_blur_bg,
     render_shorts_black_bg,
 )
-from silence_cutter import cut_silence, cut_video_segments
 from subtitle_generator import generate_ass, save_ass
 from transcribe import transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
@@ -62,9 +61,6 @@ MAX_FILE_SIZE_MB = 100000  # Increased to naturally allow huge files
 
 # ─── In-memory render job tracker ────────────────────────────
 render_jobs: dict = {}
-
-# ─── In-memory cut-silence job tracker ───────────────────────
-cut_silence_jobs: dict = {}
 
 # ─── In-memory reframe job tracker ───────────────────────────
 reframe_jobs: dict = {}
@@ -220,9 +216,6 @@ class RefineRequest(BaseModel):
     gemini_api_key: str
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
-    min_silence_ms: int = 500
-    padding_ms: int = 100
-    do_cut_silence: bool = True
     do_grouping: bool = True
 
 
@@ -230,6 +223,8 @@ class YtAnalyzeRequest(BaseModel):
     url: str
     criteria: str = ""          # empty → auto (find all clippable moments)
     gemini_api_key: str         # required — user provides it each time, never stored
+    use_chat_signal: bool = True
+    include_setup: bool = True
 
 
 class YtClip(BaseModel):
@@ -707,70 +702,6 @@ async def list_outputs():
     return {"files": files}
 
 
-# ─── Cut Silence ────────────────────────────────────────────
-
-def _do_cut_silence(job_id: str, req: CutSilenceRequest):
-    """Background task: detect silence from word timestamps and cut it out."""
-    logs: list[str] = []
-
-    def progress(msg: str):
-        logs.append(msg)
-        cut_silence_jobs[job_id]["log"] = logs[-1]
-
-    try:
-        video_path = UPLOAD_DIR / req.video_filename
-        if not video_path.exists():
-            cut_silence_jobs[job_id] = {
-                "status": "error",
-                "error": f"Video file not found: {req.video_filename}",
-            }
-            return
-
-        cut_silence_jobs[job_id]["status"] = "processing"
-
-        words_dicts = [w.model_dump() for w in req.words]
-
-        output_filename = f"{video_path.stem}_silencecut_{job_id}.mp4"
-        output_path = RENDERED_DIR / output_filename
-
-        stats = cut_silence(
-            video_path=str(video_path),
-            words=words_dicts,
-            output_path=str(output_path),
-            min_silence_ms=req.min_silence_ms,
-            padding_ms=req.padding_ms,
-            progress_cb=progress,
-        )
-
-        cut_silence_jobs[job_id] = {
-            "status": "done",
-            "filename": output_filename,
-            "url": f"/rendered/{output_filename}",
-            **stats,
-        }
-
-    except Exception as e:
-        print(f"[cut_silence] Error: {e}")
-        cut_silence_jobs[job_id] = {"status": "error", "error": str(e)}
-
-
-@app.post("/cut-silence")
-async def start_cut_silence(req: CutSilenceRequest, background_tasks: BackgroundTasks):
-    """Start a background silence-cutting job. Returns a job_id for polling."""
-    job_id = uuid.uuid4().hex[:8]
-    cut_silence_jobs[job_id] = {"status": "queued", "log": "Queued…"}
-    background_tasks.add_task(_do_cut_silence, job_id, req)
-    return {"job_id": job_id}
-
-
-@app.get("/cut-silence-status/{job_id}")
-async def get_cut_silence_status(job_id: str):
-    """Poll the status of a cut-silence job."""
-    if job_id not in cut_silence_jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return cut_silence_jobs[job_id]
-
-
 # ─── Upload-only (for Reframe / VTuber short) ───────────────
 
 @app.post("/upload-only")
@@ -1033,14 +964,40 @@ async def get_trim_status(job_id: str):
 # ─── YT Clipper ───────────────────────────────────────────────
 
 
-def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str):
-    """Background task: extract transcript + Gemini analysis."""
+def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
+                   use_chat_signal: bool = True, include_setup: bool = True):
+    """Background task: extract transcript + optional chat-hype + Gemini analysis."""
     try:
         yt_analyze_jobs[job_id] = {"status": "extracting", "message": "Extracting captions from YouTube…"}
         transcript_data = extract_transcript(url)
 
+        chat_buckets = None
+        if use_chat_signal:
+            yt_analyze_jobs[job_id] = {
+                "status": "chat",
+                "message": "Fetching live-chat replay for hype signal…",
+            }
+            try:
+                from yt_clipper import fetch_chat_replay, bucket_chat
+                chat_msgs = fetch_chat_replay(url)
+                if chat_msgs:
+                    chat_buckets = bucket_chat(
+                        chat_msgs,
+                        transcript_data["video_duration"],
+                        bucket_size=15.0,
+                    )
+            except Exception as chat_err:
+                print(f"[yt-analyze] Chat signal skipped: {chat_err}")
+                chat_buckets = None
+
         yt_analyze_jobs[job_id] = {"status": "analyzing", "message": "Sending transcript to Gemini AI…"}
-        clips = analyze_with_gemini(transcript_data, criteria, api_key)
+        clips = analyze_with_gemini(
+            transcript_data,
+            criteria,
+            api_key,
+            chat_buckets=chat_buckets,
+            include_setup=include_setup,
+        )
 
         yt_analyze_jobs[job_id] = {
             "status": "done",
@@ -1061,7 +1018,15 @@ async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTas
         raise HTTPException(status_code=400, detail="Gemini API key is required.")
     job_id = uuid.uuid4().hex[:8]
     yt_analyze_jobs[job_id] = {"status": "queued", "message": "Queued…"}
-    background_tasks.add_task(_do_yt_analyze, job_id, req.url, req.criteria, req.gemini_api_key.strip())
+    background_tasks.add_task(
+        _do_yt_analyze,
+        job_id,
+        req.url,
+        req.criteria,
+        req.gemini_api_key.strip(),
+        req.use_chat_signal,
+        req.include_setup,
+    )
     return {"job_id": job_id}
 
 
@@ -1150,9 +1115,6 @@ def _do_refine(job_id: str, req: RefineRequest):
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             elevenlabs_api_key=req.elevenlabs_api_key,
-            min_silence_ms=req.min_silence_ms,
-            padding_ms=req.padding_ms,
-            do_cut_silence=req.do_cut_silence,
             do_grouping=req.do_grouping,
             progress_cb=progress,
         )
@@ -1165,9 +1127,8 @@ def _do_refine(job_id: str, req: RefineRequest):
         # Save to JSON so it can be reloaded
         import json
         req_path = Path(req.video_filename)
-        # If silence was cut, output video is in RENDERED root, and we don't have relative paths.
-        rel_parent = Path() if req.do_cut_silence else req_path.parent
-        stem = Path(result["video_filename"]).stem if req.do_cut_silence else req_path.stem
+        rel_parent = req_path.parent
+        stem = req_path.stem
         tx_path = OUTPUT_DIR / rel_parent / f"{stem}_transcription.json"
         tx_path.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -1175,18 +1136,6 @@ def _do_refine(job_id: str, req: RefineRequest):
                 json.dump(result, f, ensure_ascii=False)
         except Exception as e:
             print(f"[refine] Failed to save JSON: {e}")
-
-        # If we created a new video via cut_silence, copy it to UPLOAD_DIR
-        # so it appears as a selectable upload for the user.
-        if req.do_cut_silence:
-            src_video = RENDERED_DIR / result["video_filename"]
-            dst_video = UPLOAD_DIR / result["video_filename"]
-            if src_video.exists():
-                import shutil
-                shutil.copy(str(src_video), str(dst_video))
-
-
-
     except Exception as e:
         print(f"[refine] Error: {e}")
         import traceback

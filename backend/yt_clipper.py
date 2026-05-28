@@ -213,6 +213,7 @@ def _extract_via_transcript_api(url: str) -> dict:
         "video_id": video_id,
         "video_duration": duration,
         "segments": segments,
+        "first_speech_t": float(segments[0]["start"]) if segments else 0.0,
         "plain_text": _segments_to_plain_text(segments),
     }
 
@@ -328,11 +329,14 @@ def extract_transcript(url: str) -> dict:
                 if not segments:
                     raise RuntimeError("Captions were found but could not be parsed.")
 
+                first_speech_t = float(segments[0]["start"]) if segments else 0.0
+
                 return {
                     "video_title": title,
                     "video_id": video_id,
                     "video_duration": duration,
                     "segments": segments,
+                    "first_speech_t": first_speech_t,
                     "plain_text": _segments_to_plain_text(segments),
                 }
 
@@ -372,21 +376,288 @@ def extract_transcript(url: str) -> dict:
     )
 
 
+# ─── Live Chat Replay (hype signal) ──────────────────────────────────────────
+
+# EN + JP laugh / hype regexes (case-insensitive on EN side via re.I)
+_LAUGH_RE = re.compile(
+    r"(?:\b(?:lol|lmao+|rofl|haha+|hehe+|kek+w?|lul+w?|omegalul|pepelaugh)\b"
+    r"|w{2,}$|w{3,}|草+|笑+|涙|🤣|😂|💀)",
+    re.IGNORECASE,
+)
+_HYPE_RE = re.compile(
+    r"(?:\b(?:pog+|poggers|pogchamp|let'?s ?go+|holy|insane|cracked|sheesh|no way|wtf)\b"
+    r"|🔥|神|やばい|ヤバい|えぐ|すご+|ぱねえ|うおお+)",
+    re.IGNORECASE,
+)
+
+
+def fetch_chat_replay(url: str) -> list[dict]:
+    """
+    Pull live-chat replay JSONL via yt-dlp. Returns [{t: float_seconds, text: str}, ...].
+    Returns [] silently if no chat replay (regular VOD, premieres without chat, etc).
+    """
+    if not YT_DLP_AVAILABLE:
+        return []
+
+    msgs = []
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for cookie_opt in _get_cookie_opts_list():
+                try:
+                    ydl_opts = {
+                        "skip_download": True,
+                        "writesubtitles": True,
+                        "subtitleslangs": ["live_chat"],
+                        "subtitlesformat": "json",
+                        "outtmpl": str(Path(tmpdir) / "%(id)s.%(ext)s"),
+                        "quiet": True,
+                        "no_warnings": True,
+                        "logger": _SilentLogger(),
+                    }
+                    ydl_opts.update(cookie_opt)
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.extract_info(url, download=True)
+                    break
+                except Exception:
+                    continue
+
+            tmp_path = Path(tmpdir)
+            chat_files = sorted(tmp_path.glob("*.live_chat.json"))
+            if not chat_files:
+                print("[yt-clipper] No live-chat replay available (skipping hype signal).")
+                return []
+
+            for line in chat_files[0].read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                # Path: replayChatItemAction.actions[0].addChatItemAction.item
+                actions = (
+                    obj.get("replayChatItemAction", {})
+                    .get("actions", [])
+                )
+                if not actions:
+                    continue
+                offset_ms = int(obj.get("replayChatItemAction", {}).get("videoOffsetTimeMsec", 0) or 0)
+                t = offset_ms / 1000.0
+
+                for act in actions:
+                    item = act.get("addChatItemAction", {}).get("item", {})
+                    renderer = (
+                        item.get("liveChatTextMessageRenderer")
+                        or item.get("liveChatPaidMessageRenderer")
+                        or {}
+                    )
+                    msg = renderer.get("message", {})
+                    runs = msg.get("runs", [])
+                    parts = []
+                    for r in runs:
+                        if "text" in r:
+                            parts.append(r["text"])
+                        elif "emoji" in r:
+                            emoji = r["emoji"]
+                            shortcuts = emoji.get("shortcuts") or []
+                            if shortcuts:
+                                parts.append(shortcuts[0])
+                            elif emoji.get("emojiId"):
+                                parts.append(emoji["emojiId"])
+                    text = " ".join(parts).strip()
+                    if text:
+                        msgs.append({"t": t, "text": text})
+    except Exception as e:
+        print(f"[yt-clipper] Chat replay fetch failed (non-fatal): {e}")
+        return []
+
+    print(f"[yt-clipper] Loaded {len(msgs)} chat messages.")
+    return msgs
+
+
+def bucket_chat(chat_msgs: list[dict], video_duration: float, bucket_size: float = 15.0) -> list[dict]:
+    """
+    Aggregate chat into fixed-size time buckets.
+    Returns [{t_start, msgs, laugh, hype, score, top_emotes:[(token,count)...]}, ...]
+    """
+    if not chat_msgs or video_duration <= 0:
+        return []
+
+    n = int(video_duration // bucket_size) + 1
+    buckets = [{"t_start": i * bucket_size, "msgs": 0, "laugh": 0, "hype": 0, "tokens": {}}
+               for i in range(n)]
+
+    for m in chat_msgs:
+        idx = int(m["t"] // bucket_size)
+        if idx < 0 or idx >= n:
+            continue
+        b = buckets[idx]
+        b["msgs"] += 1
+        text = m["text"]
+        if _LAUGH_RE.search(text):
+            b["laugh"] += 1
+        if _HYPE_RE.search(text):
+            b["hype"] += 1
+        # Track repeated all-caps tokens / emote-like words for top_emotes
+        for tok in text.split():
+            if 2 <= len(tok) <= 24 and (tok.isupper() or tok.endswith("LUL") or tok.endswith("KEKW")):
+                b["tokens"][tok] = b["tokens"].get(tok, 0) + 1
+
+    out = []
+    for b in buckets:
+        if b["msgs"] == 0:
+            continue
+        score = b["msgs"] + 2.0 * b["laugh"] + 1.5 * b["hype"]
+        top_emotes = sorted(b["tokens"].items(), key=lambda kv: -kv[1])[:3]
+        out.append({
+            "t_start": b["t_start"],
+            "msgs": b["msgs"],
+            "laugh": b["laugh"],
+            "hype": b["hype"],
+            "score": round(score, 1),
+            "top_emotes": top_emotes,
+        })
+    return out
+
+
+def format_chat_timeline(buckets: list[dict], min_msgs: int = 2) -> str:
+    """
+    Compact, token-cheap timeline for Gemini.
+    Skips empty / sub-threshold buckets to keep prompt small.
+    Marks high-percentile buckets with HYPE.
+    """
+    if not buckets:
+        return ""
+
+    scores = sorted([b["score"] for b in buckets if b["msgs"] >= min_msgs])
+    if not scores:
+        return ""
+    p80 = scores[int(len(scores) * 0.80)] if len(scores) >= 5 else scores[-1]
+
+    lines = []
+    for b in buckets:
+        if b["msgs"] < min_msgs:
+            continue
+        t = int(b["t_start"])
+        hh = t // 3600
+        mm = (t % 3600) // 60
+        ss = t % 60
+        ts = f"{hh:02d}:{mm:02d}:{ss:02d}" if hh > 0 else f"{mm:02d}:{ss:02d}"
+
+        parts = [f"msgs={b['msgs']}"]
+        if b["laugh"]:
+            parts.append(f"laugh={b['laugh']}")
+        if b["hype"]:
+            parts.append(f"hype={b['hype']}")
+        if b["top_emotes"]:
+            emotes_str = ",".join(f"{tok}x{cnt}" for tok, cnt in b["top_emotes"])
+            parts.append(f"({emotes_str})")
+        if b["score"] >= p80:
+            parts.append("HYPE")
+        lines.append(f"[{ts}] " + " ".join(parts))
+
+    return "\n".join(lines)
+
+
+# ─── Story-setup walkback ────────────────────────────────────────────────────
+
+_SETUP_MARKERS_RE = re.compile(
+    r"\b(today|so basically|let me show|let me try|okay so|alright|gonna|going to|"
+    r"i'?ll|i will|the plan|step one|first(?:ly)?|introduce|so we'?re|so i'?m)\b"
+    r"|今日は|これから|まず|やって|やる|挑戦|紹介",
+    re.IGNORECASE,
+)
+
+
+def walkback_setup(
+    clips: list[dict],
+    segments: list[dict],
+    first_speech_t: float = 0.0,
+    max_back: float = 120.0,
+) -> list[dict]:
+    """
+    For each clip, walk transcript backward from clip.start (≤max_back seconds)
+    to find the nearest story-setup anchor (a question, a setup marker, or a topic
+    pivot). If found, snap clip.start back to that anchor so the clip includes
+    "what they're about to do" lead-in. Never crosses first_speech_t.
+    """
+    if not segments:
+        return clips
+
+    for clip in clips:
+        original_start = float(clip["start"])
+        floor = max(first_speech_t, original_start - max_back)
+        best = None  # (segment_start, priority) — lower priority wins ties
+
+        for seg in segments:
+            s_start = float(seg["start"])
+            if s_start >= original_start:
+                break
+            if s_start < floor:
+                continue
+            text = seg["text"].strip()
+            if not text:
+                continue
+
+            priority = None
+            # Priority 1: explicit setup marker
+            if _SETUP_MARKERS_RE.search(text):
+                priority = 1
+            # Priority 2: setup-style question
+            elif text.endswith("?") or text.endswith("？"):
+                priority = 2
+
+            if priority is not None:
+                # Prefer earliest qualifying anchor (gives most lead-in context)
+                if best is None or priority < best[1]:
+                    best = (s_start, priority)
+                elif priority == best[1] and s_start < best[0]:
+                    best = (s_start, priority)
+
+        if best is not None:
+            new_start = max(floor, best[0])
+            if new_start < original_start - 1.0:  # only snap if non-trivial
+                clip["start"] = round(new_start, 2)
+                clip["duration"] = round(float(clip["end"]) - new_start, 2)
+
+    return clips
+
+
 # ─── Gemini Analysis ─────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
-You are a YouTube content analyst. Your job is to identify the most clip-worthy moments 
+You are a YouTube content analyst. Your job is to identify the most clip-worthy moments
 from a video transcript. The user will tell you their criteria. You must return ONLY valid JSON.
 
 Rules:
 - Each clip should be a self-contained, engaging moment.
 - Minimum clip duration: 60 seconds. Maximum: 4 minutes (240 seconds).
-- Include some context before and after the key moment (a few seconds).
+- Each clip MUST include 5-30s of story setup before the peak moment — the streamer
+  explaining what they're about to do, the question they're asking, or the situation
+  they're walking into. Cold-open clips that start mid-action are bad clips.
 - Do not overlap clips unless they represent clearly distinct highlights.
 - Return 3–15 clips unless the user specifically asks for more or fewer.
-- IMPORTANT: start and end values MUST be plain decimal numbers representing SECONDS from the
-  start of the video. For example, if a moment occurs at 25 minutes and 30 seconds,
-  return "start": 1530.0 — NOT "start": 25 or "start": "25:30".
+
+Opening-song warning:
+- The first 15-90 seconds of streams often contain an opening song or BGM intro with
+  NO dialogue. Chat may spike during the song with hype emotes — IGNORE those spikes.
+  A real clip needs actual transcript dialogue. Never start a clip inside an opening
+  song or before the first spoken line.
+
+Live chat hype signal (when provided):
+- A separate timeline shows live-chat activity in 15s buckets with msgs/laugh/hype counts.
+- Buckets marked HYPE are top-percentile activity spikes.
+- High laugh counts strongly suggest a funny moment worth clipping.
+- Use chat spikes to CONFIRM clip-worthy transcript moments. Prefer moments where both
+  the transcript content AND chat hype peak together. Do NOT clip purely on chat spikes
+  if the transcript at that point is silent or just opening-song lyrics.
+
+Timestamps:
+- IMPORTANT: start and end values MUST be plain decimal numbers representing SECONDS
+  from the start of the video. For example, if a moment occurs at 25 minutes and 30
+  seconds, return "start": 1530.0 — NOT "start": 25 or "start": "25:30".
 
 Respond ONLY with a JSON array in this exact format (no markdown, no explanation):
 [
@@ -406,17 +677,22 @@ def analyze_with_gemini(
     transcript_data: dict,
     criteria: str,
     api_key: str,
+    chat_buckets: Optional[list[dict]] = None,
+    include_setup: bool = True,
 ) -> list[dict]:
     """
-    Send the transcript to Gemini and ask it to identify clip-worthy moments.
+    Send the transcript (and optional chat-hype timeline) to Gemini and ask it
+    to identify clip-worthy moments.
 
     Args:
         transcript_data: output from extract_transcript()
         criteria: user's description of what clips they want (or empty for auto)
         api_key: Google Gemini API key (provided per-request, never stored)
+        chat_buckets: optional output of bucket_chat() to inject hype signal
+        include_setup: if True, walk start back ≤120s to nearest story-setup anchor
 
     Returns:
-        list of clip dicts: [{id, title, start, end, reason, duration}]
+        list of clip dicts: [{id, title, start, end, reason, duration, selected}]
     """
     if not GEMINI_AVAILABLE:
         raise RuntimeError(
@@ -428,15 +704,33 @@ def analyze_with_gemini(
     title = transcript_data["video_title"]
     duration = transcript_data["video_duration"]
     plain_text = transcript_data["plain_text"]
+    segments = transcript_data.get("segments", [])
+    first_speech_t = float(transcript_data.get("first_speech_t", 0.0))
 
     user_criteria = criteria.strip() if criteria.strip() else "Find every clearly clippable moment — funny, insightful, emotional, or highly engaging."
+
+    chat_block = ""
+    if chat_buckets:
+        chat_timeline = format_chat_timeline(chat_buckets)
+        if chat_timeline:
+            chat_block = (
+                "\nLive chat hype timeline (15s buckets, only active buckets shown):\n"
+                f"{chat_timeline}\n"
+            )
+
+    intro_note = ""
+    if first_speech_t > 1.0:
+        intro_note = (
+            f"\nNote: first spoken transcript line starts at {first_speech_t:.1f}s. "
+            f"Anything before that is opening song / BGM — never clip there.\n"
+        )
 
     prompt = f"""\
 Video title: {title}
 Video total duration: {int(duration // 60)}m {int(duration % 60)}s
 
 User criteria: {user_criteria}
-
+{intro_note}{chat_block}
 Transcript (format: [HH:MM:SS] text):
 {plain_text}
 """
@@ -447,11 +741,27 @@ Transcript (format: [HH:MM:SS] text):
         config=genai_types.GenerateContentConfig(
             system_instruction=_SYSTEM_PROMPT,
             temperature=0.3,
+            response_mime_type="application/json",
+            response_schema={
+                "type": "ARRAY",
+                "items": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "id":     {"type": "INTEGER"},
+                        "title":  {"type": "STRING"},
+                        "start":  {"type": "NUMBER"},
+                        "end":    {"type": "NUMBER"},
+                        "reason": {"type": "STRING"},
+                    },
+                    "required": ["id", "title", "start", "end", "reason"],
+                    "propertyOrdering": ["id", "title", "start", "end", "reason"],
+                },
+            },
         ),
     )
     raw = response.text.strip()
 
-    # Strip markdown code fences if present
+    # Defensive: strip markdown fences if model still emits them despite schema
     raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
     raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
 
@@ -494,6 +804,24 @@ Transcript (format: [HH:MM:SS] text):
             "reason": clip.get("reason", ""),
             "selected": True,
         })
+
+    # ── Opening-song guard: never start before first spoken line ──────────
+    if first_speech_t > 0:
+        for c in validated:
+            if c["start"] < first_speech_t:
+                c["start"] = round(first_speech_t, 2)
+                if c["end"] - c["start"] < 30:
+                    c["end"] = round(min(duration, c["start"] + 60), 2)
+                c["duration"] = round(c["end"] - c["start"], 2)
+
+    # ── Story-setup walkback (≤120s) ──────────────────────────────────────
+    if include_setup and segments:
+        validated = walkback_setup(
+            validated,
+            segments,
+            first_speech_t=first_speech_t,
+            max_back=120.0,
+        )
 
     return validated
 
