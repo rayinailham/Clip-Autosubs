@@ -284,6 +284,7 @@ class TrimRequest(BaseModel):
 class RefineRequest(BaseModel):
     video_filename: str
     gemini_api_key: str
+    gemini_model: Optional[str] = None
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
     diarize: bool = False
@@ -1467,6 +1468,7 @@ def _do_refine(job_id: str, req: RefineRequest):
             output_dir=str(OUTPUT_DIR),
             rendered_dir=str(RENDERED_DIR),
             gemini_api_key=req.gemini_api_key,
+            gemini_model=req.gemini_model,
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             elevenlabs_api_key=req.elevenlabs_api_key,
@@ -1613,8 +1615,7 @@ async def test_elevenlabs(req: TestKeyRequest):
     """Test an ElevenLabs key (and optional model). Falls back to saved values."""
     s = load_settings()
     key = req.api_key.strip() or s.get("elevenlabs_api_key", "")
-    model = (req.model or s.get("elevenlabs_model") or "").strip() or None
-    return test_elevenlabs_key(key, model)
+    return test_elevenlabs_key(key)
 
 
 @app.post("/settings/test/gemini")
