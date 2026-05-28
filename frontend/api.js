@@ -76,6 +76,19 @@ export async function pollRenderStatus(renderId) {
   return res.json();
 }
 
+export async function exportSrt(payload) {
+  const res = await fetch('/export-srt', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'SRT export failed');
+  }
+  return res.json();
+}
+
 export async function deleteUpload(filename) {
   const res = await fetch('/uploads/' + encodeURIComponent(filename), { method: 'DELETE' });
   if (!res.ok) {

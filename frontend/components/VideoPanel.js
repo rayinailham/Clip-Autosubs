@@ -54,7 +54,10 @@ export default {
       const ve = videoEl.value;
       const displayedHeight = ve.clientHeight || ve.offsetHeight || 1;
       const actualHeight = ve.videoHeight || store.metadata.height || 1080;
-      const scaledFontSize = (fontSizeASS * displayedHeight / actualHeight) + 'px';
+      // Reference height makes font_size aspect-portable: "80" means 80px at 1080 reference,
+      // so vertical/4K videos scale up proportionally instead of looking tiny.
+      const REF_HEIGHT = 1080;
+      const scaledFontSize = (fontSizeASS * displayedHeight / REF_HEIGHT) + 'px';
 
       const shadowDepth = s.shadow || 0;
       const shadowColor = s.shadowColor || '#000000';
@@ -159,8 +162,10 @@ export default {
 
       preview.style.fontSize = scaledFontSize;
       preview.style.fontFamily = fontFamily + ', Impact, sans-serif';
-      preview.style.letterSpacing = (s.letterSpacing || 0) + 'px';
-      preview.style.wordSpacing = (s.wordGap || 0) * 4 + 'px';
+      // Scale spacing by ratio so px values track font size across resolutions.
+      // Render runs at ratio=1 (full video res); preview runs at <1 (downscaled).
+      preview.style.letterSpacing = ((s.letterSpacing || 0) * ratio) + 'px';
+      preview.style.wordSpacing = ((s.wordGap || 0) * 4 * ratio) + 'px';
       preview.style.fontWeight = bold ? 'bold' : 'normal';
 
       const fontStyle = italic ? 'italic' : 'normal';

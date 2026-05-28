@@ -112,8 +112,9 @@ def generate_subtitle_html(words, groups, style, width, height):
     // Apply static styles
     preview.style.fontSize = scaledFontSize;
     preview.style.fontFamily = fontFamily + ', Impact, sans-serif';
-    preview.style.letterSpacing = (s.letter_spacing || 0) + 'px';
-    preview.style.wordSpacing = (s.word_gap || 0) * 4 + 'px';
+    // Scale spacing by ratio (matches VideoPanel.js). ratio=1 here at full res.
+    preview.style.letterSpacing = ((s.letter_spacing || 0) * ratio) + 'px';
+    preview.style.wordSpacing = ((s.word_gap || 0) * 4 * ratio) + 'px';
     preview.style.fontWeight = bold ? 'bold' : 'normal';
     const fontStyle = italic ? 'italic' : 'normal';
     const fontWeight = bold ? 'bold' : 'normal';
@@ -181,13 +182,13 @@ def generate_subtitle_html(words, groups, style, width, height):
           let html = '';
           if (animName === 'typewriter') {{
             const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
-            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-fade-in" style="${{baseStyle}}; padding-bottom:10px; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
+            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-fade-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
           }} else if (animName === 'cascade') {{
             const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
-            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-pop-in" style="${{baseStyle}}; padding-bottom:10px; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
+            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-pop-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
           }} else {{
             const animClass = animName !== 'none' ? 'subtitle-anim-' + animName : '';
-            html = `<span class="subtitle-word ${{animClass}}" style="${{baseStyle}}; padding-bottom:10px; --anim-speed:${{animSpeedMs}}ms">${{sentence}}</span>`;
+            html = `<span class="subtitle-word ${{animClass}}" style="${{baseStyle}}; --anim-speed:${{animSpeedMs}}ms">${{sentence}}</span>`;
           }}
           animWrapper.innerHTML = html;
           return "frame";
@@ -222,7 +223,7 @@ def generate_subtitle_html(words, groups, style, width, height):
         const scaleVal = isActive ? `scale(${{scale}})` : 'scale(1)';
         const fs = ws.font_size ? `font-size:${{Math.round(ws.font_size * displayedHeight / actualHeight)}}px;` : '';
         
-        return `<span class="subtitle-word" style="color:${{color}}; transform:${{scaleVal}}; ${{fs}}; font-style:${{fontStyle}}; font-weight:${{fontWeight}}; text-shadow:${{textShadow}}; padding-bottom: 20px;">${{text}}</span>`;
+        return `<span class="subtitle-word" style="color:${{color}}; transform:${{scaleVal}}; ${{fs}}; font-style:${{fontStyle}}; font-weight:${{fontWeight}}; text-shadow:${{textShadow}};">${{text}}</span>`;
       }}).join(' ');
       
       // Update DOM

@@ -1169,7 +1169,146 @@ Transcript (format: [HH:MM:SS] text):
             max_back=120.0,
         )
 
+    # ── Factor tagging: explain WHY each clip was chosen ──────────────────
+    validated = tag_clip_factors(validated, chat_buckets, duration)
+
     return validated
+
+
+def tag_clip_factors(
+    clips: list[dict],
+    chat_buckets: Optional[list[dict]],
+    video_duration: float,
+) -> list[dict]:
+    """
+    Attach a `factors` list to each clip explaining the signals that make it
+    clip-worthy. Tag schema:
+        {"key": str, "label": str, "tone": str, "detail": str}
+    Tones: 'intro' | 'outro' | 'paid' | 'member' | 'spike' | 'wall' |
+           'laughter' | 'hype' | 'sustained'
+    """
+    if not clips:
+        return clips
+
+    intro_cutoff = max(120.0, video_duration * 0.05) if video_duration else 120.0
+    outro_cutoff = video_duration - max(120.0, video_duration * 0.05) if video_duration else 0.0
+
+    for clip in clips:
+        c_start = float(clip["start"])
+        c_end = float(clip["end"])
+        factors: list[dict] = []
+
+        # ── position-based tags ──
+        if c_start <= intro_cutoff:
+            factors.append({
+                "key": "intro",
+                "label": "Intro",
+                "tone": "intro",
+                "detail": "Opening of the stream",
+            })
+        if video_duration and c_end >= outro_cutoff and c_start >= video_duration * 0.75:
+            factors.append({
+                "key": "outro",
+                "label": "Outro",
+                "tone": "outro",
+                "detail": "Closing of the stream",
+            })
+
+        # ── chat-signal based tags ──
+        if chat_buckets:
+            in_range = [
+                b for b in chat_buckets
+                if b["t_start"] >= c_start - 30 and b["t_start"] <= c_end + 5
+            ]
+            if in_range:
+                sc_count = sum(b.get("sc_count", 0) for b in in_range)
+                sc_usd = sum(b.get("sc_usd", 0.0) for b in in_range)
+                members = sum(b.get("members", 0) for b in in_range)
+                stickers = sum(b.get("stickers", 0) for b in in_range)
+                laugh = sum(b.get("laugh", 0) for b in in_range)
+                hype = sum(b.get("hype", 0) for b in in_range)
+                msgs = sum(b.get("msgs", 0) for b in in_range)
+                emote_wall_buckets = sum(1 for b in in_range if b.get("emote_wall"))
+                spike_buckets = sum(1 for b in in_range if b.get("spike"))
+                max_z = max((b.get("z_score", 0) for b in in_range), default=0)
+                top_emotes = []
+                for b in in_range:
+                    for tok, cnt in b.get("top_emotes") or []:
+                        top_emotes.append((tok, cnt))
+                top_emotes.sort(key=lambda kv: -kv[1])
+                top_emotes = top_emotes[:3]
+
+                if sc_count >= 1:
+                    factors.append({
+                        "key": "superchat",
+                        "label": f"{sc_count} Superchat{'s' if sc_count > 1 else ''}" + (f" (~${sc_usd:.0f})" if sc_usd >= 1 else ""),
+                        "tone": "paid",
+                        "detail": "Viewers paid money during this moment",
+                    })
+                if members >= 1:
+                    factors.append({
+                        "key": "member",
+                        "label": f"{members} New Member{'s' if members > 1 else ''}",
+                        "tone": "member",
+                        "detail": "Someone subscribed or gifted memberships here",
+                    })
+                if stickers >= 1 and sc_count == 0:
+                    factors.append({
+                        "key": "sticker",
+                        "label": f"{stickers} Super Sticker{'s' if stickers > 1 else ''}",
+                        "tone": "paid",
+                        "detail": "Paid sticker reactions",
+                    })
+                if spike_buckets >= 1:
+                    factors.append({
+                        "key": "chat_spike",
+                        "label": f"Chat Spike (z={max_z:.1f})",
+                        "tone": "spike",
+                        "detail": "Sudden surge in chat activity vs surrounding minutes",
+                    })
+                if emote_wall_buckets >= 1:
+                    emote_str = ", ".join(f"{tok}×{cnt}" for tok, cnt in top_emotes) if top_emotes else "spammed reactions"
+                    factors.append({
+                        "key": "emote_wall",
+                        "label": "Emote Wall",
+                        "tone": "wall",
+                        "detail": f"Chat flooded with reactions ({emote_str})",
+                    })
+                if laugh >= max(3, msgs * 0.15):
+                    factors.append({
+                        "key": "laughter",
+                        "label": f"Laughter ×{laugh}",
+                        "tone": "laughter",
+                        "detail": "Lots of laugh tokens (lol/草/🤣)",
+                    })
+                if hype >= max(3, msgs * 0.15):
+                    factors.append({
+                        "key": "hype",
+                        "label": f"Hype ×{hype}",
+                        "tone": "hype",
+                        "detail": "Hype tokens (pog/sheesh/やばい/🔥)",
+                    })
+                # Fallback: clip has chat activity but no specific spike -> "active chat"
+                if not factors and msgs >= 5:
+                    factors.append({
+                        "key": "active_chat",
+                        "label": f"Active Chat ({msgs} msgs)",
+                        "tone": "sustained",
+                        "detail": "Sustained chat activity during this moment",
+                    })
+
+        # If still empty, surface a transcript-only tag so the UI never shows blank
+        if not factors:
+            factors.append({
+                "key": "transcript",
+                "label": "Transcript Pick",
+                "tone": "sustained",
+                "detail": "Selected from dialogue content (no chat data)",
+            })
+
+        clip["factors"] = factors
+
+    return clips
 
 
 # ─── Download + FFmpeg Cut ────────────────────────────────────────────────────

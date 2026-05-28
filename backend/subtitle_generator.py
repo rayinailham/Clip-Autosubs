@@ -677,3 +677,106 @@ def save_ass(content: str, output_path: str) -> str:
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     return str(path)
+
+
+def format_srt_time(seconds: float) -> str:
+    """Convert seconds to SRT time format HH:MM:SS,mmm."""
+    if seconds < 0:
+        seconds = 0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = int(round((seconds - int(seconds)) * 1000))
+    if ms >= 1000:
+        ms = 0
+        s += 1
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def generate_srt(
+    words: list,
+    words_per_group: int = 4,
+    custom_groups: list = None,
+    use_custom_groups: bool = False,
+    uppercase: bool = False,
+) -> str:
+    """
+    Generate plain SRT subtitle content (Premiere Pro compatible).
+
+    One cue per group. No styling — Premiere imports timing+text and you
+    style inside Premiere's Captions panel. Animations / per-word highlight /
+    glow / position are not portable to SRT.
+
+    Args:
+        words: list of {text, start, end, ...}
+        words_per_group: auto-grouping size when use_custom_groups is False
+        custom_groups: list of {word_indices, start, end} when use_custom_groups
+        use_custom_groups: if True, build cues from custom_groups
+        uppercase: uppercase the cue text
+
+    Returns:
+        SRT file content as a string.
+    """
+    if not words:
+        return ""
+
+    if use_custom_groups and custom_groups:
+        groups = build_custom_groups(words, custom_groups)
+    else:
+        groups = group_words(words, words_per_group)
+
+    cues = []
+    cue_idx = 0
+    for group in groups:
+        group_words_list = group.get("words") or []
+        if not group_words_list:
+            continue
+
+        text = " ".join(w["text"] for w in group_words_list).strip()
+        if not text:
+            continue
+        if uppercase:
+            text = text.upper()
+
+        start = float(group.get("start", group_words_list[0]["start"]))
+        end = float(group.get("end", group_words_list[-1]["end"]))
+
+        # Guard: SRT requires end > start
+        if end <= start:
+            end = start + 0.5
+
+        # Guard: avoid overlap with next cue (Premiere accepts overlaps but
+        # caption-track import can stack badly). Trim end to just before the
+        # next group's start when needed.
+        cues.append({
+            "start": start,
+            "end": end,
+            "text": text,
+        })
+
+    # Sort + de-overlap (clamp each cue's end to next cue's start - 1ms)
+    cues.sort(key=lambda c: c["start"])
+    for i in range(len(cues) - 1):
+        nxt = cues[i + 1]["start"]
+        if cues[i]["end"] > nxt:
+            cues[i]["end"] = max(cues[i]["start"] + 0.05, nxt - 0.001)
+
+    out_lines = []
+    for c in cues:
+        cue_idx += 1
+        out_lines.append(str(cue_idx))
+        out_lines.append(f"{format_srt_time(c['start'])} --> {format_srt_time(c['end'])}")
+        out_lines.append(c["text"])
+        out_lines.append("")  # blank line between cues
+
+    return "\n".join(out_lines).rstrip() + "\n"
+
+
+def save_srt(content: str, output_path: str) -> str:
+    """Save SRT subtitle content to a file (UTF-8 with BOM for Premiere)."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Premiere Pro reads UTF-8 with BOM most reliably for non-ASCII chars.
+    with open(path, "w", encoding="utf-8-sig") as f:
+        f.write(content)
+    return str(path)

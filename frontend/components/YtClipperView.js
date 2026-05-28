@@ -56,8 +56,10 @@ export default {
     const analyzeElapsed = ref(0);
     const analyzeJobId = ref('');
     const videoTitle = ref('');
+    const videoId = ref('');
     const videoDuration = ref(0);
     const proposedClips = ref([]);
+    const previewClipId = ref(null); // currently expanded inline iframe
 
     const cutStatus = ref('idle'); // idle | running | done | error
     const cutMessage = ref('');
@@ -100,8 +102,10 @@ export default {
         analyzeElapsed: analyzeElapsed.value,
         analyzeJobId: analyzeJobId.value,
         videoTitle: videoTitle.value,
+        videoId: videoId.value,
         videoDuration: videoDuration.value,
         proposedClips: proposedClips.value,
+        previewClipId: previewClipId.value,
         cutStatus: cutStatus.value,
         cutMessage: cutMessage.value,
         cutProgress: cutProgress.value,
@@ -172,6 +176,7 @@ export default {
             clearInterval(analyzePollTimer);
             analyzeStatus.value = 'done';
             videoTitle.value = data.video_title;
+            videoId.value = data.video_id || '';
             videoDuration.value = data.video_duration;
             proposedClips.value = (data.clips || []).map(c => ({ ...c, selected: true }));
             persist();
@@ -257,6 +262,17 @@ export default {
       return `/uploads/${encodeURIComponent(filename)}`;
     }
 
+    function ytEmbedUrl(start) {
+      if (!videoId.value) return '';
+      const s = Math.max(0, Math.floor(start || 0));
+      return `https://www.youtube.com/embed/${videoId.value}?start=${s}&autoplay=1&rel=0`;
+    }
+
+    function togglePreview(clipId) {
+      previewClipId.value = previewClipId.value === clipId ? null : clipId;
+      persist();
+    }
+
     function goSubtitleClip(filename) {
       store.yt.prefillFile = filename;
       store.currentView = 'upload';
@@ -321,12 +337,12 @@ export default {
       useChatSignal, includeSetup,
       store,
       analyzeStatus, analyzeMessage, analyzeStage, analyzeElapsed, stageLabel, fmtElapsed,
-      videoTitle, videoDuration, proposedClips,
+      videoTitle, videoId, videoDuration, proposedClips, previewClipId,
       cutStatus, cutMessage, cutProgress, doneClips,
       selectedClips, canAnalyze, canCut,
       startAnalyze, startCut,
       toggleAll, fmtSeconds, fmtDuration,
-      goHome, goSubtitleClip, clipUrl, reset,
+      goHome, goSubtitleClip, clipUrl, ytEmbedUrl, togglePreview, reset,
     };
   },
 
@@ -481,21 +497,52 @@ export default {
           v-for="clip in proposedClips"
           :key="clip.id"
           class="ytc-clip-item"
-          :class="{ 'ytc-clip-item--selected': clip.selected }"
-          @click="clip.selected = !clip.selected"
+          :class="{ 'ytc-clip-item--selected': clip.selected, 'ytc-clip-item--expanded': previewClipId === clip.id }"
         >
-          <div class="ytc-clip-check">
-            <input type="checkbox" :checked="clip.selected" @click.stop="clip.selected = !clip.selected" />
-          </div>
-          <div class="ytc-clip-body">
-            <div class="ytc-clip-top">
-              <span class="ytc-clip-title">{{ clip.title }}</span>
-              <span class="ytc-clip-time">
-                {{ fmtSeconds(clip.start) }} &ndash; {{ fmtSeconds(clip.end) }}
-                <span class="ytc-clip-dur">({{ fmtDuration(clip.duration) }})</span>
-              </span>
+          <div class="ytc-clip-row" @click="clip.selected = !clip.selected">
+            <div class="ytc-clip-check">
+              <input type="checkbox" :checked="clip.selected" @click.stop="clip.selected = !clip.selected" />
             </div>
-            <p class="ytc-clip-reason">{{ clip.reason }}</p>
+            <div class="ytc-clip-body">
+              <div class="ytc-clip-top">
+                <span class="ytc-clip-title">{{ clip.title }}</span>
+                <span class="ytc-clip-time">
+                  {{ fmtSeconds(clip.start) }} &ndash; {{ fmtSeconds(clip.end) }}
+                  <span class="ytc-clip-dur">({{ fmtDuration(clip.duration) }})</span>
+                </span>
+              </div>
+              <p class="ytc-clip-reason">{{ clip.reason }}</p>
+              <div v-if="clip.factors && clip.factors.length" class="ytc-factor-chips">
+                <span
+                  v-for="f in clip.factors"
+                  :key="f.key"
+                  class="ytc-chip"
+                  :class="'ytc-chip--' + f.tone"
+                  :title="f.detail"
+                >{{ f.label }}</span>
+              </div>
+            </div>
+            <button
+              class="btn btn-ghost btn-xs ytc-preview-btn"
+              type="button"
+              @click.stop="togglePreview(clip.id)"
+              :disabled="!videoId"
+              :title="videoId ? 'Preview at this timestamp' : 'No video id available'"
+            >
+              {{ previewClipId === clip.id ? '\u25BC Hide' : '\u25B6 Play' }}
+            </button>
+          </div>
+
+          <div v-if="previewClipId === clip.id && videoId" class="ytc-clip-preview">
+            <div class="ytc-iframe-wrap">
+              <iframe
+                :src="ytEmbedUrl(clip.start)"
+                frameborder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+                loading="lazy"
+              ></iframe>
+            </div>
           </div>
         </div>
       </div>

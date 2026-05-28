@@ -290,17 +290,25 @@
 
 .ytc-clip-item {
   display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 12px 14px;
+  flex-direction: column;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  cursor: pointer;
   transition: background 0.12s, border-color 0.12s;
   user-select: none;
+  overflow: hidden;
 }
 .ytc-clip-item:hover { background: var(--surface2); }
 .ytc-clip-item--selected { border-color: var(--accent); background: var(--accent-dim); }
+.ytc-clip-item--expanded { background: var(--surface2); }
+
+.ytc-clip-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  cursor: pointer;
+}
 
 .ytc-clip-check {
   flex-shrink: 0;
@@ -534,4 +542,63 @@
 .ytc-toggle input:disabled + span {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* ── Factor chips (why was this clip chosen) ───────────────── */
+.ytc-factor-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.ytc-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  cursor: help;
+  line-height: 1.5;
+}
+
+.ytc-chip--intro     { background: rgba(96,165,250,0.12); color: #93c5fd; border-color: rgba(96,165,250,0.35); }
+.ytc-chip--outro     { background: rgba(167,139,250,0.12); color: #c4b5fd; border-color: rgba(167,139,250,0.35); }
+.ytc-chip--paid      { background: rgba(74,222,128,0.14); color: #86efac; border-color: rgba(74,222,128,0.4); }
+.ytc-chip--member    { background: rgba(244,114,182,0.14); color: #f9a8d4; border-color: rgba(244,114,182,0.4); }
+.ytc-chip--spike     { background: rgba(251,146,60,0.14); color: #fdba74; border-color: rgba(251,146,60,0.4); }
+.ytc-chip--wall      { background: rgba(217,255,61,0.12); color: #d9ff3d; border-color: rgba(217,255,61,0.35); }
+.ytc-chip--laughter  { background: rgba(250,204,21,0.14); color: #fde047; border-color: rgba(250,204,21,0.4); }
+.ytc-chip--hype      { background: rgba(248,113,113,0.14); color: #fca5a5; border-color: rgba(248,113,113,0.4); }
+.ytc-chip--sustained { background: rgba(255,255,255,0.05); color: var(--text-dim); border-color: rgba(255,255,255,0.12); }
+
+/* ── Preview Play button + inline iframe ───────────────── */
+.ytc-preview-btn {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.78rem;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.ytc-clip-preview {
+  border-top: 1px solid var(--border);
+  background: #000;
+}
+
+.ytc-iframe-wrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+}
+
+.ytc-iframe-wrap iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }
