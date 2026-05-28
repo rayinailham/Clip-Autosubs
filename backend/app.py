@@ -38,6 +38,7 @@ from reframe_renderer import (
 from subtitle_generator import generate_ass, save_ass, generate_srt
 from transcribe import transcribe_video
 from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
+import yt_cache
 from refine import refine_video
 from settings import (
     load_settings, save_settings,
@@ -1186,9 +1187,19 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                    use_chat_signal: bool = True, include_setup: bool = True):
     """Background task: extract transcript + optional chat-hype + Gemini analysis."""
     import time as _time
+    from yt_clipper import _extract_video_id
     t0 = _time.time()
     def _elapsed():
         return int(_time.time() - t0)
+
+    # ── Cache lookup ──────────────────────────────────────────
+    # Per-video checkpoint. If user retries (e.g. Gemini failed), we
+    # skip transcript + chat re-download. New URL → wipe old cache.
+    video_id = _extract_video_id(url)
+    cached = yt_cache.load(video_id) if video_id else None
+    if video_id:
+        yt_cache.clear_other(video_id)
+
     try:
         yt_analyze_jobs[job_id] = {
             "status": "extracting",
@@ -1227,15 +1238,41 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                 "elapsed": _elapsed(),
             }
 
-        transcript_data = extract_transcript(url, progress_cb=_tx_progress)
+        transcript_data = None
+        if cached and cached.get("transcript"):
+            transcript_data = cached["transcript"]
+            yt_analyze_jobs[job_id] = {
+                "status": "extracting",
+                "message": f"Using cached transcript ({len(transcript_data.get('segments', []))} segments) — skipping re-download.",
+                "elapsed": _elapsed(),
+            }
+            log.info("yt-analyze %s — transcript cache HIT (video_id=%s)", job_id, video_id)
+        else:
+            transcript_data = extract_transcript(url, progress_cb=_tx_progress)
+            if video_id:
+                try:
+                    yt_cache.save_transcript(video_id, url, transcript_data)
+                except Exception as ce:
+                    log.warning("yt-analyze %s — could not cache transcript: %s", job_id, ce)
 
         chat_buckets = None
         if use_chat_signal:
-            yt_analyze_jobs[job_id] = {
-                "status": "chat",
-                "message": "Fetching live-chat replay for hype signal…",
-                "elapsed": _elapsed(),
-            }
+            # Cache check: if chat already fetched for this video, skip download.
+            if cached and cached.get("chat_buckets") is not None:
+                chat_buckets = cached.get("chat_buckets") or None
+                n_msgs = len(cached.get("chat_msgs") or [])
+                yt_analyze_jobs[job_id] = {
+                    "status": "chat",
+                    "message": f"Using cached chat replay ({n_msgs} msgs) — skipping re-download.",
+                    "elapsed": _elapsed(),
+                }
+                log.info("yt-analyze %s — chat cache HIT (%d msgs)", job_id, n_msgs)
+            else:
+                yt_analyze_jobs[job_id] = {
+                    "status": "chat",
+                    "message": "Fetching live-chat replay for hype signal…",
+                    "elapsed": _elapsed(),
+                }
             try:
                 from yt_clipper import fetch_chat_replay, bucket_chat, annotate_baseline_signals
 
@@ -1267,20 +1304,30 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
                         "elapsed": _elapsed(),
                     }
 
-                chat_msgs = fetch_chat_replay(url, progress_cb=_chat_progress)
-                if chat_msgs:
-                    yt_analyze_jobs[job_id] = {
-                        "status": "chat",
-                        "message": f"Bucketing {len(chat_msgs)} chat messages…",
-                        "elapsed": _elapsed(),
-                    }
-                    chat_buckets = bucket_chat(
-                        chat_msgs,
-                        transcript_data["video_duration"],
-                        bucket_size=15.0,
-                    )
-                    if chat_buckets:
-                        chat_buckets = annotate_baseline_signals(chat_buckets)
+                # Skip live download if cache already provided buckets above.
+                chat_msgs = None
+                if not (cached and cached.get("chat_buckets") is not None):
+                    chat_msgs = fetch_chat_replay(url, progress_cb=_chat_progress)
+                    if chat_msgs:
+                        yt_analyze_jobs[job_id] = {
+                            "status": "chat",
+                            "message": f"Bucketing {len(chat_msgs)} chat messages…",
+                            "elapsed": _elapsed(),
+                        }
+                        chat_buckets = bucket_chat(
+                            chat_msgs,
+                            transcript_data["video_duration"],
+                            bucket_size=15.0,
+                        )
+                        if chat_buckets:
+                            chat_buckets = annotate_baseline_signals(chat_buckets)
+                    # Save checkpoint even when chat_msgs is empty (no chat replay) —
+                    # avoids re-attempting download on retry.
+                    if video_id:
+                        try:
+                            yt_cache.save_chat(video_id, chat_msgs or [], chat_buckets)
+                        except Exception as ce:
+                            log.warning("yt-analyze %s — could not cache chat: %s", job_id, ce)
             except Exception as chat_err:
                 log.warning("yt-analyze %s — chat signal skipped: %s", job_id, chat_err)
                 chat_buckets = None

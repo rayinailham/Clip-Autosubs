@@ -132,6 +132,27 @@ class _SilentLogger:
     def error(self, msg): pass
 
 
+# Verbose logger for download stage — surfaces format selection so we know
+# what resolution/codec yt-dlp actually picked.
+class _DownloadLogger:
+    def debug(self, msg):
+        s = str(msg)
+        # yt-dlp prefixes debug lines with "[debug] ". Skip noise, keep
+        # format-related lines + final picks.
+        if s.startswith("[debug] "):
+            return
+        if any(k in s for k in (
+            "[info]", "[youtube]", "Downloading 1 format",
+            "Downloading 2 format", "Merger", "Requested format",
+            "format(s):", "[download] Destination",
+        )):
+            log.info("yt-dlp: %s", s)
+    def warning(self, msg):
+        log.warning("yt-dlp: %s", msg)
+    def error(self, msg):
+        log.error("yt-dlp: %s", msg)
+
+
 
 def _extract_via_transcript_api(url: str) -> dict:
     """
@@ -1380,30 +1401,23 @@ def download_video(
     for c_idx, cookie_opt in enumerate(cookie_opts):
         try:
             ydl_opts = {
-                # Format selection — prioritize MAX resolution, never trap
-                # into 360p progressive MP4.
+                # Format selection — pure max-resolution.
                 #
-                # Chain (best → worst):
-                #   1. AVC1 + M4A   — clean MP4 mux, no transcode, plays everywhere.
-                #                     Available up to 1080p on most videos.
-                #   2. ANY bv* + ba — covers VP9/AV1 high-res (1440p/2160p/HDR).
-                #                     ffmpeg remuxes into MP4 container.
-                #   3. b            — single-file fallback (last resort).
+                # `bv*+ba/b` = best video + best audio (any codec), or best
+                # single-file. `format_sort` then forces highest-res first;
+                # codec preference is broken on purpose so a 1080p VP9
+                # never loses to a 360p AVC1.
                 #
-                # `format_sort` forces highest resolution → fps → bitrate
-                # before codec preference, so we never silently downgrade.
-                "format": (
-                    "bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
-                    "/bv*[ext=mp4]+ba[ext=m4a]"
-                    "/bv*+ba"
-                    "/b"
-                ),
+                # `merge_output_format=mp4` remuxes VP9/Opus → MP4 container
+                # without re-encode (no quality loss).
+                "format": "bv*+ba/b",
                 "format_sort": ["res", "fps", "vbr", "abr"],
                 "merge_output_format": "mp4",
                 "outtmpl": outtmpl,
-                "quiet": True,
-                "no_warnings": True,
-                "logger": _SilentLogger(),
+                "quiet": False,
+                "no_warnings": False,
+                "verbose": True,
+                "logger": _DownloadLogger(),
                 "progress_hooks": [_ProgressHook()],
                 "concurrent_fragment_downloads": 16,
                 "continuedl": True,
@@ -1603,14 +1617,28 @@ def download_and_cut_clips(
     yt_transcript = None
     video_title = "Unknown Video"
     video_id = _extract_video_id(url)
-    
+
+    # Try cache first to avoid re-running extract_transcript when user
+    # already analyzed this video (saves a full caption re-download).
     try:
-        log.info("Extracting reference transcript for clips…")
-        yt_transcript = extract_transcript(url)
-        video_title = yt_transcript.get("video_title", video_title)
-        video_id = yt_transcript.get("video_id", video_id)
-    except Exception as e:
-        log.warning("Could not extract reference transcript/metadata: %s", e)
+        import yt_cache  # local import: avoid circular at module load
+        cached = yt_cache.load(video_id) if video_id else None
+        if cached and cached.get("transcript"):
+            yt_transcript = cached["transcript"]
+            video_title = yt_transcript.get("video_title", video_title)
+            video_id = yt_transcript.get("video_id", video_id)
+            log.info("download_and_cut: using cached transcript for %s", video_id)
+    except Exception:
+        pass
+
+    if yt_transcript is None:
+        try:
+            log.info("Extracting reference transcript for clips…")
+            yt_transcript = extract_transcript(url)
+            video_title = yt_transcript.get("video_title", video_title)
+            video_id = yt_transcript.get("video_id", video_id)
+        except Exception as e:
+            log.warning("Could not extract reference transcript/metadata: %s", e)
 
     # Stage 1: Create folder named after video title
     # Sanitize title for folder name (remove illegal characters)
