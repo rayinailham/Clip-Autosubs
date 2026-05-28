@@ -80,7 +80,7 @@ def get_video_info(video_path: str) -> dict:
 
         return {"width": width, "height": height, "duration": duration}
     except Exception as e:
-        print(f"[renderer] ffprobe failed, using defaults: {e}")
+        log.warning("ffprobe failed, using defaults: %s", e)
         return {"width": 1920, "height": 1080, "duration": 0}
 
 
@@ -132,8 +132,8 @@ def render_video(
         str(output_path),
     ]
 
-    print(f"[renderer] Command: {' '.join(cmd)}")
-    print(f"[renderer] Rendering...")
+    log.debug("Command: %s", " ".join(cmd))
+    log.info("Rendering…")
 
     result = subprocess.run(
         cmd,
@@ -146,7 +146,7 @@ def render_video(
 
     if result.returncode != 0:
         # Try fallback with 'subtitles' filter instead of 'ass'
-        print(f"[renderer] 'ass' filter failed, trying 'subtitles' filter...")
+        log.warning("'ass' filter failed, trying 'subtitles' filter…")
         cmd_fallback = [
             "ffmpeg", "-y",
             "-i", str(video_path),
@@ -175,7 +175,7 @@ def render_video(
         raise RuntimeError("FFmpeg completed but output file was not created")
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
-    print(f"[renderer] Done! Output: {output_path} ({size_mb:.1f} MB)")
+    log.info("Done — output: %s ([ok]%.1f MB[/])", output_path, size_mb)
     return str(output_path)
 
 
@@ -205,7 +205,7 @@ def cut_video_segments(
         if progress_cb:
             progress_cb(msg)
         else:
-            print(f"[cut_segments] {msg}")
+            log.info("cut_segments — %s", msg)
 
     vp = Path(video_path).resolve()
     op = Path(output_path).resolve()

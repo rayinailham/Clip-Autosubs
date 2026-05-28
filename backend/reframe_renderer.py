@@ -172,7 +172,7 @@ def render_vtuber_short(
         str(output_path),
     ]
 
-    print(f"[reframe] Command:\n  {' '.join(cmd)}")
+    log.debug("Command:\n  %s", " ".join(cmd))
     if progress_cb:
         progress_cb("Running FFmpeg…")
 
@@ -187,7 +187,7 @@ def render_vtuber_short(
 
     size_mb = output_path.stat().st_size / (1024 * 1024)
     msg = f"Done! {output_path.name}  ({size_mb:.1f} MB)"
-    print(f"[reframe] {msg}")
+    log.info("%s", msg)
     if progress_cb:
         progress_cb(msg)
 
@@ -200,7 +200,7 @@ def render_vtuber_short(
 
 def _run_ffmpeg(cmd: list[str], output_path, progress_cb=None):
     """Run an FFmpeg command and raise on failure."""
-    print(f"[reframe] Command:\n  {' '.join(cmd)}")
+    log.debug("Command:\n  %s", " ".join(cmd))
     if progress_cb:
         progress_cb("Running FFmpeg…")
     result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=900)
@@ -211,7 +211,7 @@ def _run_ffmpeg(cmd: list[str], output_path, progress_cb=None):
         raise RuntimeError("FFmpeg completed but output file was not created")
     size_mb = Path(output_path).stat().st_size / (1024 * 1024)
     msg = f"Done! {Path(output_path).name}  ({size_mb:.1f} MB)"
-    print(f"[reframe] {msg}")
+    log.info("%s", msg)
     if progress_cb:
         progress_cb(msg)
     return str(output_path)

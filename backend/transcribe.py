@@ -68,7 +68,7 @@ def transcribe_video(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[transcribe] ElevenLabs Scribe ({model_id}) — {video_path.name}")
+    log.info("ElevenLabs Scribe (%s) — %s", model_id, video_path.name)
     t_start = time.time()
 
     # ── Extract audio (opus 96k mono) — keeps upload small but preserves
@@ -76,7 +76,7 @@ def transcribe_video(
     with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
         audio_path = tmp.name
     try:
-        print("[transcribe] Extracting audio…")
+        log.info("Extracting audio…")
         ff = subprocess.run(
             [
                 "ffmpeg", "-y", "-i", str(video_path),
@@ -103,10 +103,11 @@ def transcribe_video(
         if language_code:
             data["language_code"] = language_code
 
-        print(
-            f"[transcribe] Uploading {Path(audio_path).stat().st_size / 1e6:.1f}MB "
-            f"to ElevenLabs (diarize={data['diarize']}, "
-            f"num_speakers={data.get('num_speakers', 'auto')})…"
+        log.info(
+            "Uploading %.1fMB to ElevenLabs (diarize=%s, num_speakers=%s)…",
+            Path(audio_path).stat().st_size / 1e6,
+            data["diarize"],
+            data.get("num_speakers", "auto"),
         )
         with open(audio_path, "rb") as f:
             files = {"file": (Path(audio_path).name, f, "audio/ogg")}
@@ -175,7 +176,7 @@ def transcribe_video(
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
-    print(f"[transcribe] Done — {len(words)} words in {elapsed}s -> {json_path.name}")
+    log.info("Done — %d words in %ss -> %s", len(words), elapsed, json_path.name)
     return output
 
 

@@ -15,6 +15,10 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
+from logger import get_logger
+
+log = get_logger("yt_clipper")
+
 try:
     import yt_dlp
     YT_DLP_AVAILABLE = True
@@ -138,7 +142,7 @@ def _extract_via_transcript_api(url: str) -> dict:
     if not video_id:
         raise RuntimeError(f"Could not extract video ID from URL: {url}")
 
-    print(f"[yt-clipper] Trying youtube_transcript_api for {video_id}…")
+    log.info("Trying youtube_transcript_api for %s…", video_id)
 
     # Fetch transcript list via the API
     # Must use an instance as 'list' is a bound method
@@ -162,7 +166,9 @@ def _extract_via_transcript_api(url: str) -> dict:
                 # Just take whatever is first
                 transcript = next(iter(transcript_list))
     
-    print(f"[yt-clipper] Using transcript language: {transcript.language} ({'auto-generated' if transcript.is_generated else 'manual'})")
+    log.info("Using transcript language: %s (%s)",
+             transcript.language,
+             "auto-generated" if transcript.is_generated else "manual")
     entries = transcript.fetch()
 
     segments = []
@@ -374,7 +380,8 @@ def extract_transcript(url: str, progress_cb=None) -> dict:
 
             if is_rate_limit and attempt < max_retries:
                 wait_secs = 5 * (2 ** (attempt - 1))  # 5s, 10s, 20s
-                print(f"[yt-clipper] 429 rate-limited (attempt {attempt}/{max_retries}), retrying in {wait_secs}s…")
+                log.warning("429 rate-limited (attempt %d/%d), retrying in %ss…",
+                            attempt, max_retries, wait_secs)
                 time.sleep(wait_secs)
                 continue
             elif not is_rate_limit:
@@ -385,8 +392,8 @@ def extract_transcript(url: str, progress_cb=None) -> dict:
     # ── Fallback: try youtube_transcript_api ──────────────────────────────────
     if YT_TRANSCRIPT_API_AVAILABLE:
         try:
-            print(f"[yt-clipper] yt-dlp subtitle download failed: {last_error}")
-            print("[yt-clipper] trying youtube_transcript_api fallback…")
+            log.warning("yt-dlp subtitle download failed: %s", last_error)
+            log.info("trying youtube_transcript_api fallback…")
             return _extract_via_transcript_api(url)
         except Exception as fallback_err:
             raise RuntimeError(
@@ -469,7 +476,7 @@ def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
             tmp_path = Path(tmpdir)
             chat_files = sorted(tmp_path.glob("*.live_chat.json"))
             if not chat_files:
-                print("[yt-clipper] No live-chat replay available (skipping hype signal).")
+                log.info("No live-chat replay available (skipping hype signal).")
                 _emit("no_chat")
                 return []
 
@@ -518,10 +525,10 @@ def fetch_chat_replay(url: str, progress_cb=None) -> list[dict]:
                     if text:
                         msgs.append({"t": t, "text": text})
     except Exception as e:
-        print(f"[yt-clipper] Chat replay fetch failed (non-fatal): {e}")
+        log.warning("Chat replay fetch failed (non-fatal): %s", e)
         return []
 
-    print(f"[yt-clipper] Loaded {len(msgs)} chat messages.")
+    log.info("Loaded %d chat messages.", len(msgs))
     return msgs
 
 
@@ -971,9 +978,9 @@ def download_video(
             # Print warning but don't abort unless it's the last try
             if c_idx < len(cookie_opts) - 1 and not (("429" in err_msg) and ("Too Many" in err_msg)):
                 if "Could not copy" in err_msg and "cookie" in err_msg:
-                    print(f"[yt-clipper] Cookie database locked or inaccessible. Trying next…")
+                    log.warning("Cookie database locked or inaccessible. Trying next…")
                 elif is_bot_error:
-                    print(f"[yt-clipper] Bot detection triggered. Trying next option…")
+                    log.warning("Bot detection triggered. Trying next option…")
                 continue
 
             if is_bot_error:
@@ -1073,12 +1080,12 @@ def download_and_cut_clips(
     video_id = _extract_video_id(url)
     
     try:
-        print("[yt-clipper] Extracting reference transcript for clips…")
+        log.info("Extracting reference transcript for clips…")
         yt_transcript = extract_transcript(url)
         video_title = yt_transcript.get("video_title", video_title)
         video_id = yt_transcript.get("video_id", video_id)
     except Exception as e:
-        print(f"[yt-clipper] Warning: Could not extract reference transcript/metadata: {e}")
+        log.warning("Could not extract reference transcript/metadata: %s", e)
 
     # Stage 1: Create folder named after video title
     # Sanitize title for folder name (remove illegal characters)
@@ -1095,7 +1102,7 @@ def download_and_cut_clips(
         progress_cb("downloading full video", 0)
 
     # Stage 2: Download full video once
-    print(f"[yt-clipper] Downloading full video for local clipping...")
+    log.info("Downloading full video for local clipping…")
     
     def _full_dl_progress(pct, speed_str=""):
         if progress_cb:
@@ -1121,7 +1128,8 @@ def download_and_cut_clips(
         target_filename = f"{filename_stem}{full_video_path.suffix}"
         out_path = folder_path / target_filename
 
-        print(f"[yt-clipper] Cutting clip: {clip['start']}s - {clip['end']}s into {filename_stem}")
+        log.info("Cutting clip: %ss - %ss into %s",
+                 clip['start'], clip['end'], filename_stem)
         if progress_cb:
             progress_cb(f"cutting clip {i+1}/{total_clips}", 50 + int((i / total_clips) * 50))
             
@@ -1152,7 +1160,7 @@ def download_and_cut_clips(
                 cap_path = out_path.with_suffix(".yt_captions.json")
                 with open(cap_path, "w", encoding="utf-8") as f:
                     json.dump({"segments": clip_segments}, f, indent=2, ensure_ascii=False)
-                print(f"[yt-clipper] Saved reference captions: {cap_path.name}")
+                log.info("Saved reference captions: %s", cap_path.name)
 
         results.append({
             "id": clip["id"],
@@ -1170,8 +1178,8 @@ def download_and_cut_clips(
     try:
         if full_video_path.exists():
             full_video_path.unlink()
-            print(f"[yt-clipper] Deleted full source video: {full_video_path.name}")
+            log.info("Deleted full source video: %s", full_video_path.name)
     except Exception as e:
-        print(f"[yt-clipper] Warning: Could not delete full source video: {e}")
+        log.warning("Could not delete full source video: %s", e)
 
     return results

@@ -254,8 +254,8 @@ async def render_html_sequence_to_video(html_content: str, video_path: str, outp
     with os.fdopen(fd, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
-    print(f"[html_renderer] HTML saved to {temp_html_path}")
-    print(f"[html_renderer] capture_fps={capture_fps} output_fps={fps}")
+    log.info("HTML saved to %s", temp_html_path)
+    log.info("capture_fps=%d output_fps=%d", capture_fps, fps)
     
     # We use FFmpeg to read images from stdin. We output 32-bit (rgba) to overlay seamlessly
     ffmpeg_cmd = [
@@ -277,7 +277,7 @@ async def render_html_sequence_to_video(html_content: str, video_path: str, outp
         str(output_path)
     ]
     
-    print(f"[html_renderer] Starting FFmpeg process...")
+    log.info("Starting FFmpeg process…")
     # Use a file for stderr to prevent OS pipe deadlocks since we are writing to stdin
     stderr_fd, stderr_path = tempfile.mkstemp(suffix=".log", text=True)
     
@@ -330,25 +330,30 @@ async def render_html_sequence_to_video(html_content: str, video_path: str, outp
                 if progress_callback and f % 5 == 0:
                     progress_callback(pct)
                 if f % 150 == 0:
-                    print(f"[html_renderer] Rendered {f}/{total_frames} frames ({pct:.1f}%)... reused={reused}")
+                    log.info("Rendered %d/%d frames (%.1f%%) — reused=%d",
+                             f, total_frames, pct, reused)
 
-            print(f"[html_renderer] Finished sending all {total_frames} frames to FFmpeg. (100.0%) reused={reused}/{total_frames} ({reused*100/max(1,total_frames):.1f}%)")
-            
+            log.info(
+                "Finished sending all %d frames to FFmpeg (100.0%%) — reused=%d/%d (%.1f%%)",
+                total_frames, reused, total_frames,
+                reused * 100 / max(1, total_frames),
+            )
+
             if progress_callback:
                 progress_callback(100.0)
-            
+
             await browser.close()
-            
-            print(f"[html_renderer] Playwright browser closed. Waiting for FFmpeg to finalize file...")
+
+            log.info("Playwright browser closed. Waiting for FFmpeg to finalize file…")
             # Close stdin so ffmpeg can finish
             process.stdin.close()
             process.wait()
-            print(f"[html_renderer] FFmpeg finalized successfully.")
+            log.info("FFmpeg finalized successfully.")
             
             if process.returncode != 0:
                 with open(stderr_path, 'r', encoding='utf-8', errors='replace') as sf:
                     stderr_content = sf.read()
-                print(f"[html_renderer] FFmpeg Error:\n{stderr_content[-1500:]}")
+                log.error("FFmpeg Error:\n%s", stderr_content[-1500:])
                 raise RuntimeError("FFmpeg crashed during piped rendering.")
             
     finally:

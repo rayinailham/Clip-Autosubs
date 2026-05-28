@@ -414,8 +414,8 @@ def refine_video(
         dict with video_filename, words (with speakers), groups,
         speakers, metadata.
     """
-    def log(step: str, msg: str):
-        print(f"[refine:{step}] {msg}")
+    def log_step(step: str, msg: str):
+        log.info("[bold]%s[/] — %s", step, msg)
         if progress_cb:
             progress_cb(step, msg)
 
@@ -528,9 +528,9 @@ def refine_video(
 
     # 4d — Groups (validate, fallback if needed)
     raw_groups = analysis.get("groups", [])
-    print(f"[DEBUG] raw_groups length = {len(raw_groups)}")
+    log.debug("raw_groups length = %d", len(raw_groups))
     if raw_groups and len(raw_groups) > 0:
-        print(f"[DEBUG] first raw_group = {raw_groups[0]}")
+        log.debug("first raw_group = %s", raw_groups[0])
 
     validated_groups = _validate_groups(raw_groups, adjusted_words, excluded_indices)
 
