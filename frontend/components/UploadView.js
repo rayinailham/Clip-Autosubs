@@ -31,10 +31,12 @@ export default {
     // Diarization settings (persist via store)
     if (!store.diarization) {
       store.diarization = {
-        hfToken: '',
-        maxSpeakers: null,
+        enabled: false,
+        numSpeakers: null,
       };
     }
+    if (store.diarization.enabled === undefined) store.diarization.enabled = false;
+    if (store.diarization.numSpeakers === undefined) store.diarization.numSpeakers = null;
 
     function getDiarizeOpts() {
       const model = store.settings.elevenlabs_model || store.transcriptionModel || 'scribe_v1';
@@ -46,8 +48,11 @@ export default {
       } else if (store.elevenlabsApiKey) {
         opts.elevenlabs_api_key = store.elevenlabsApiKey.trim();
       }
-      const maxSp = store.diarization.maxSpeakers;
-      if (maxSp && maxSp > 0) opts.max_speakers = maxSp;
+      if (store.diarization.enabled) {
+        opts.diarize = true;
+        const n = parseInt(store.diarization.numSpeakers, 10);
+        if (n && n > 0) opts.num_speakers = n;
+      }
       return opts;
     }
 
@@ -249,6 +254,20 @@ export default {
             <span>🔑 ElevenLabs API Key</span>
             <input type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
           </label>
+        </div>
+
+        <!-- Diarization (only useful with ElevenLabs Scribe) -->
+        <div v-if="store.transcriptionModel === 'scribe_v2'" style="margin-bottom: 0.8rem; background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+          <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+            <span>🗣 Diarize speakers</span>
+            <input type="checkbox" v-model="store.diarization.enabled" />
+          </label>
+          <div v-if="store.diarization.enabled" style="margin-top: 0.5rem; display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; color: var(--text-dim);">
+            <span>Speakers (optional hint, 1–32)</span>
+            <input type="number" min="1" max="32" v-model.number="store.diarization.numSpeakers"
+                   placeholder="auto"
+                   style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 80px;" />
+          </div>
         </div>
 
       </div>

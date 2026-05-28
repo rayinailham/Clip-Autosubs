@@ -1,14 +1,11 @@
 """
-Refine Engine — Automated vertical video refinement pipeline.
+Refine Engine — Automated subtitle pipeline.
 
 Orchestrates:
-  1. WhisperX transcription (word-level timestamps)
-  2. Silence removal (using word gaps)
-  3. Gemini AI analysis:
-     - Speaker identification & diarization
+  1. WhisperX (or other) transcription (word-level timestamps)
+  2. Gemini AI analysis:
+     - Spelling/punctuation correction (hybrid mode w/ YouTube CC)
      - Natural subtitle grouping (sentence-boundary aware)
-     - Best hook moment detection
-     - Overlap resolution
 """
 
 import json
@@ -29,47 +26,6 @@ except ImportError:
 
 from transcribe import transcribe_video
 from renderer import get_video_info
-
-
-# ─── Timestamp adjustment after silence cut ──────────────────
-
-def adjust_timestamps(
-    words: list[dict],
-    kept_segments: list[tuple[float, float]],
-) -> list[dict]:
-    """
-    Adjust word timestamps to match the silence-cut output video.
-
-    In the output video, kept_segments are concatenated back-to-back.
-    Words that fall within a kept segment get their timestamps shifted
-    so they line up with the concatenated timeline.
-    Words outside all kept segments are dropped.
-    """
-    adjusted = []
-    for word in words:
-        w_start = word["start"]
-        w_end = word["end"]
-        running_time = 0.0
-
-        for seg_start, seg_end in kept_segments:
-            seg_dur = seg_end - seg_start
-
-            # Word starts within (or very close to) this kept segment
-            if w_start >= seg_start - 0.05 and w_start <= seg_end + 0.05:
-                new_start = running_time + max(0.0, w_start - seg_start)
-                new_end = running_time + min(seg_dur, w_end - seg_start)
-                if new_end <= new_start:
-                    new_end = new_start + (w_end - w_start)
-
-                adj = dict(word)
-                adj["start"] = round(new_start, 3)
-                adj["end"] = round(new_end, 3)
-                adjusted.append(adj)
-                break
-
-            running_time += seg_dur
-
-    return adjusted
 
 
 # ─── Gemini Analysis ────────────────────────────────────────
@@ -95,6 +51,7 @@ Group the words into perfectly natural, readable subtitle chunks. You MUST stric
 - Provide the explicit array of `word_indices` for each group. They must flow consecutively without repeating indices.
 
 ═══ RESPONSE FORMAT ═══
+Return ONLY valid JSON, no markdown, no commentary. The JSON object MUST have BOTH keys present, even when empty:
 {
   "optimized_words": [
      {"index": 0, "text": "Corrected word"}
@@ -104,8 +61,13 @@ Group the words into perfectly natural, readable subtitle chunks. You MUST stric
     {"word_indices": [6, 7]}
   ]
 }
-Note: 'optimized_words' should only be returned if you found corrections to make.
-If you return 'optimized_words', ONLY include the specific words you corrected by their exact index. Do NOT return the entire unchanged transcript.
+Rules for `optimized_words`:
+- Only include words you actually corrected by exact INDEX. Do NOT echo unchanged words.
+- If you have no corrections, return `"optimized_words": []` (an empty array — never omit the key).
+Rules for `groups`:
+- ALWAYS produce groups covering every input index exactly once.
+- Indices must be consecutive within a group and groups must appear in order.
+- If you cannot group (input is empty), return `"groups": []`.
 """
 
 
@@ -121,20 +83,19 @@ class WordGroupModel(BaseModel):
     word_indices: list[int]
 
 class RefineResponseModel(BaseModel):
+    # Required fields with empty-list defaults. Gemini structured output is more
+    # reliable when fields are required than when marked optional, so we keep
+    # them required and instruct the model to return [] when there is nothing.
     optimized_words: list[OptimizedWordModel] = Field(default_factory=list)
     groups: list[WordGroupModel] = Field(default_factory=list)
 
-def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optional[str] = None) -> dict:
-    """
-    Send word-level transcript to Gemini for speaker identification,
-    smart grouping and overlap handling.
-    
-    If reference_text (YouTube captions) is provided, Gemini will use it
-     to improve spelling and punctuation.
-    """
-    if not GEMINI_AVAILABLE:
-        raise RuntimeError("google-genai is not installed. Run: pip install google-genai")
-
+def _analyze_chunk(
+    words: list[dict],
+    api_key: str,
+    reference_text: Optional[str],
+    index_offset: int,
+) -> dict:
+    """Send a single chunk of words to Gemini. Indices in returned result are LOCAL to the chunk."""
     client = genai.Client(api_key=api_key)
 
     # Build compact transcript from Source A (WhisperX)
@@ -185,6 +146,81 @@ def analyze_with_gemini(words: list[dict], api_key: str, reference_text: Optiona
         )
 
     return result
+
+
+def _split_into_chunks(
+    words: list[dict],
+    target_size: int = 400,
+    max_size: int = 600,
+    gap_threshold: float = 0.5,
+) -> list[tuple[int, list[dict]]]:
+    """
+    Split words into chunks at natural pause boundaries.
+    Returns list of (start_index, chunk_words) tuples.
+    Aims for target_size words/chunk; splits at first gap >= gap_threshold
+    after target_size, hard-cuts at max_size.
+    """
+    chunks: list[tuple[int, list[dict]]] = []
+    n = len(words)
+    cursor = 0
+    while cursor < n:
+        end = min(cursor + max_size, n)
+        # If we still have room after the target, look for a natural pause to split.
+        if cursor + target_size < end:
+            split_at = end
+            for i in range(cursor + target_size, end - 1):
+                gap = words[i + 1]["start"] - words[i]["end"]
+                if gap >= gap_threshold:
+                    split_at = i + 1
+                    break
+            end = split_at
+        chunks.append((cursor, words[cursor:end]))
+        cursor = end
+    return chunks
+
+
+def analyze_with_gemini(
+    words: list[dict],
+    api_key: str,
+    reference_text: Optional[str] = None,
+    progress_cb: Optional[Callable[[str, str], None]] = None,
+) -> dict:
+    """
+    Send word-level transcript to Gemini for smart grouping and spell correction.
+
+    For long transcripts, splits into chunks at natural pause boundaries to keep
+    prompt size and latency reasonable. Reference text is only sent with the first
+    chunk to save tokens.
+    """
+    if not GEMINI_AVAILABLE:
+        raise RuntimeError("google-genai is not installed. Run: pip install google-genai")
+
+    # Short transcripts: single call.
+    if len(words) <= 500:
+        return _analyze_chunk(words, api_key, reference_text, index_offset=0)
+
+    # Long transcripts: chunk + merge.
+    chunks = _split_into_chunks(words)
+    merged = {"optimized_words": [], "groups": []}
+    for ci, (start_idx, chunk_words) in enumerate(chunks):
+        if progress_cb:
+            progress_cb("analyze", f"Gemini chunk {ci + 1}/{len(chunks)} ({len(chunk_words)} words)…")
+        ref = reference_text if ci == 0 else None
+        result = _analyze_chunk(chunk_words, api_key, ref, index_offset=start_idx)
+        for ow in result.get("optimized_words", []) or []:
+            local = ow.get("index")
+            if isinstance(local, int):
+                merged["optimized_words"].append({
+                    "index": local + start_idx,
+                    "text": ow.get("text", ""),
+                })
+        for g in result.get("groups", []) or []:
+            indices = g.get("word_indices") or []
+            merged["groups"].append({
+                "word_indices": [i + start_idx for i in indices if isinstance(i, int)],
+            })
+
+    return merged
 
 
 # ─── Validation helpers ─────────────────────────────────────
@@ -359,6 +395,8 @@ def refine_video(
     req_filename: str = "",
     transcription_model: str = "large-v2",
     elevenlabs_api_key: Optional[str] = None,
+    diarize: bool = False,
+    num_speakers: Optional[int] = None,
     do_grouping: bool = True,
     progress_cb: Optional[Callable[[str, str], None]] = None,
 ) -> dict:
@@ -400,7 +438,9 @@ def refine_video(
         str(video_path), 
         output_dir,
         model_id=transcription_model,
-        elevenlabs_api_key=elevenlabs_api_key
+        elevenlabs_api_key=elevenlabs_api_key,
+        diarize=diarize,
+        num_speakers=num_speakers,
     )
     words = transcription["words"]
     metadata = transcription["metadata"]
@@ -413,7 +453,7 @@ def refine_video(
     if not words:
         raise ValueError("Transcription produced no words.")
 
-    # ── Step 2: Use original video (silence cut removed) ────
+    # ── Step 2: Use original video ─────────────────────────
     output_filename = req_filename if req_filename else video_path.name
     adjusted_words = words
 
@@ -458,7 +498,7 @@ def refine_video(
     log("analyze", "Sending transcript to Gemini AI…")
 
     if do_grouping:
-        analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text)
+        analysis = analyze_with_gemini(adjusted_words, gemini_api_key, reference_text, progress_cb=progress_cb)
         log("analyze", "Gemini analysis complete")
     else:
         analysis = {}

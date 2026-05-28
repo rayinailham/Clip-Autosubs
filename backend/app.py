@@ -157,9 +157,11 @@ class TranscribeExistingRequest(BaseModel):
     filename: str
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
-    hf_token: Optional[str] = None       # HuggingFace token for diarization
-    min_speakers: Optional[int] = None   # Min speakers (hint)
-    max_speakers: Optional[int] = None   # Max speakers (hint)
+    diarize: bool = False                # Enable speaker diarization
+    num_speakers: Optional[int] = None   # Exact speaker count hint (1-32)
+    hf_token: Optional[str] = None       # Legacy — ignored
+    min_speakers: Optional[int] = None   # Legacy — mapped to num_speakers
+    max_speakers: Optional[int] = None   # Legacy — mapped to num_speakers
 
 
 class SaveStyleRequest(BaseModel):
@@ -209,6 +211,8 @@ class RefineRequest(BaseModel):
     gemini_api_key: str
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
+    diarize: bool = False
+    num_speakers: Optional[int] = None
     do_grouping: bool = True
 
 
@@ -260,13 +264,15 @@ async def transcribe_endpoint(
     file: UploadFile = File(...),
     transcription_model: Optional[str] = Form("large-v2"),
     elevenlabs_api_key: Optional[str] = Form(None),
+    diarize: bool = Form(False),
+    num_speakers: Optional[int] = Form(None),
     hf_token: Optional[str] = Form(None),
     min_speakers: Optional[int] = Form(None),
     max_speakers: Optional[int] = Form(None),
 ):
-    """Upload a video/audio file and run WhisperX transcription.
-    
-    Optionally provide a HuggingFace token to enable speaker diarization.
+    """Upload a video/audio file and transcribe via ElevenLabs Scribe.
+
+    Pass diarize=true (with optional num_speakers hint) to get speaker labels.
     """
     ext = Path(file.filename).suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -298,6 +304,8 @@ async def transcribe_endpoint(
             str(OUTPUT_DIR),
             model_id=transcription_model,
             elevenlabs_api_key=elevenlabs_api_key,
+            diarize=bool(diarize),
+            num_speakers=num_speakers,
             hf_token=hf_token or None,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
@@ -315,7 +323,7 @@ async def serve_video(filename: str):
     """Stream an uploaded video file for the browser player."""
     file_path = UPLOAD_DIR / filename
     if not file_path.exists():
-        # Fall back to rendered directory (e.g. silence-cut output)
+        # Fall back to rendered directory
         file_path = RENDERED_DIR / filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Video not found")
@@ -374,7 +382,7 @@ def _do_render(render_id: str, req: RenderRequest):
     temp_cut_path = None
     try:
         video_path = UPLOAD_DIR / req.video_filename
-        # Also check rendered dir (e.g. for silence-cut files)
+        # Also check rendered dir
         if not video_path.exists():
             video_path = RENDERED_DIR / req.video_filename
         if not video_path.exists():
@@ -639,6 +647,8 @@ async def transcribe_existing_endpoint(payload: TranscribeExistingRequest):
             str(OUTPUT_DIR),
             model_id=payload.transcription_model,
             elevenlabs_api_key=payload.elevenlabs_api_key,
+            diarize=bool(payload.diarize),
+            num_speakers=payload.num_speakers,
             hf_token=payload.hf_token or None,
             min_speakers=payload.min_speakers,
             max_speakers=payload.max_speakers,
@@ -851,7 +861,7 @@ def _do_trim(job_id: str, req: TrimRequest):
     try:
         video_path = UPLOAD_DIR / req.video_filename
         if not video_path.exists():
-            # Also check rendered dir (e.g. a silence-cut file)
+            # Also check rendered dir
             video_path = RENDERED_DIR / req.video_filename
         if not video_path.exists():
             trim_jobs[job_id] = {"status": "error", "error": f"Video not found: {req.video_filename}"}
@@ -1108,6 +1118,8 @@ def _do_refine(job_id: str, req: RefineRequest):
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             elevenlabs_api_key=req.elevenlabs_api_key,
+            diarize=req.diarize,
+            num_speakers=req.num_speakers,
             do_grouping=req.do_grouping,
             progress_cb=progress,
         )

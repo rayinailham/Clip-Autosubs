@@ -59,11 +59,14 @@ export default {
       const chip = document.querySelector('.word-chip[data-index="' + index + '"]');
       if (!chip) return;
       const word = store.words[index];
+      const originalHTML = chip.innerHTML;
       const input = document.createElement('input');
       input.type = 'text';
       input.value = word.text;
       input.className = 'word-edit-input';
+      let cancelled = false;
       const finish = () => {
+        if (cancelled) return;
         const newText = input.value.trim();
         if (newText && newText !== word.text) {
           saveUndoSnapshot('Edit word "' + word.text + '" → "' + newText + '"');
@@ -72,8 +75,12 @@ export default {
       };
       input.addEventListener('blur', finish);
       input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); finish(); }
-        if (e.key === 'Escape') { /* just blur */ input.blur(); }
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') {
+          cancelled = true;
+          // Restore original chip content; blur fires but finish() bails out.
+          chip.innerHTML = originalHTML;
+        }
       });
       chip.innerHTML = '';
       chip.appendChild(input);
@@ -85,7 +92,29 @@ export default {
       saveUndoSnapshot('Delete word "' + store.words[index].text + '"');
       store.words.splice(index, 1);
       store.selectedWordIndices = new Set();
-      regenerateAutoGroups();
+      // Remove the deleted index from custom groups and shift later indices down.
+      if (store.customGroups && store.customGroups.length > 0) {
+        const updated = [];
+        for (const g of store.customGroups) {
+          const next = g.word_indices
+            .filter(i => i !== index)
+            .map(i => (i > index ? i - 1 : i));
+          if (next.length === 0) continue;
+          updated.push({
+            ...g,
+            word_indices: next,
+            start: store.words[next[0]]?.start ?? g.start,
+            end: store.words[next[next.length - 1]]?.end ?? g.end,
+          });
+        }
+        store.customGroups = updated;
+      }
+      // Also drop any hidden index that pointed at the deleted word and shift the rest.
+      if (store.hiddenWordIndices && store.hiddenWordIndices.length > 0) {
+        store.hiddenWordIndices = store.hiddenWordIndices
+          .filter(i => i !== index)
+          .map(i => (i > index ? i - 1 : i));
+      }
     }
 
     function openMergeModal() {
@@ -102,15 +131,47 @@ export default {
       if (!ctx || !mergeText.value.trim()) return;
       saveUndoSnapshot('Merge words: ' + ctx.wordsToMerge.map(w => w.text).join(' + '));
       const firstIdx = ctx.indices[0];
+      const removed = ctx.indices.length;        // total words being merged
+      const dropped = removed - 1;               // we keep 1, lose the rest
       const mergedWord = {
         text: mergeText.value.trim(),
         start: ctx.wordsToMerge[0].start,
         end: ctx.wordsToMerge[ctx.wordsToMerge.length - 1].end,
+        speaker: ctx.wordsToMerge[0].speaker,
         _merged: true,
       };
-      store.words.splice(firstIdx, ctx.indices.length, mergedWord);
+      store.words.splice(firstIdx, removed, mergedWord);
       store.selectedWordIndices = new Set();
-      regenerateAutoGroups();
+      // Re-map customGroups: collapse merged indices to firstIdx, shift later indices down by `dropped`.
+      if (store.customGroups && store.customGroups.length > 0) {
+        const merged = new Set(ctx.indices);
+        const updated = [];
+        for (const g of store.customGroups) {
+          const next = [];
+          let placedFirst = false;
+          for (const i of g.word_indices) {
+            if (merged.has(i)) {
+              if (!placedFirst) { next.push(firstIdx); placedFirst = true; }
+              continue;
+            }
+            next.push(i > firstIdx ? i - dropped : i);
+          }
+          if (next.length === 0) continue;
+          updated.push({
+            ...g,
+            word_indices: next,
+            start: store.words[next[0]]?.start ?? g.start,
+            end: store.words[next[next.length - 1]]?.end ?? g.end,
+          });
+        }
+        store.customGroups = updated;
+      }
+      if (store.hiddenWordIndices && store.hiddenWordIndices.length > 0) {
+        const merged = new Set(ctx.indices);
+        store.hiddenWordIndices = store.hiddenWordIndices
+          .filter(i => !merged.has(i))
+          .map(i => (i > firstIdx ? i - dropped : i));
+      }
       closeMergeModal();
     }
 
@@ -129,7 +190,7 @@ export default {
 
     async function reTranscribe() {
       if (!store.videoFilename) return;
-      if (!confirm('Re-transcribe "' + store.videoFilename + '"?\\nThis will replace all current words and edits.')) return;
+      if (!confirm('Re-transcribe "' + store.videoFilename + '"?\nThis will replace all current words and edits.')) return;
       reTranscribing.value = true;
       try {
         const result = await transcribeExistingFile(store.videoFilename);
@@ -140,6 +201,10 @@ export default {
         store.useCustomGroups = false;
         store.undoStack = [];
         store.redoStack = [];
+        store.splitPoints = [];
+        store.removedSegments = [];
+        store.hiddenWordIndices = [];
+        store.speakers = {};
         regenerateAutoGroups();
       } catch (err) {
         alert('Re-transcription failed: ' + err.message);

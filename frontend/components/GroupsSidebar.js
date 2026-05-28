@@ -5,24 +5,54 @@ export default {
   setup() {
     // Always keep custom groups in sync — regenerate whenever wpg changes
     function onWpgChange() {
+      saveUndoSnapshot('Change words per group');
       regenerateAutoGroups();
       store.useCustomGroups = true;
     }
 
     function resetToAuto() {
+      saveUndoSnapshot('Reset groups to auto');
       regenerateAutoGroups();
       store.useCustomGroups = true;
     }
 
     // ── Timing ───────────────────────────────────
+    // Clamp `start` to [prev.end, this.end] and `end` to [this.start, next.start].
+    function clampTiming(gi, field, val) {
+      const g = store.customGroups[gi];
+      if (!g) return val;
+      if (field === 'start') {
+        const prev = store.customGroups[gi - 1];
+        const lo = prev ? prev.end : 0;
+        const hi = g.end;
+        return Math.min(Math.max(val, lo), hi);
+      }
+      if (field === 'end') {
+        const next = store.customGroups[gi + 1];
+        const lo = g.start;
+        const hi = next ? next.start : Number.POSITIVE_INFINITY;
+        return Math.min(Math.max(val, lo), hi);
+      }
+      return val;
+    }
+
     function setTiming(gi, field, value) {
       const val = parseFloat(value);
-      if (!isNaN(val) && val >= 0) store.customGroups[gi][field] = val;
+      if (isNaN(val) || val < 0) return;
+      const clamped = clampTiming(gi, field, val);
+      if (clamped === store.customGroups[gi][field]) return;
+      saveUndoSnapshot('Edit group ' + (gi + 1) + ' ' + field);
+      store.customGroups[gi][field] = clamped;
     }
 
     function nudgeTiming(gi, field, delta) {
-      const val = parseFloat((store.customGroups[gi][field] + delta).toFixed(2));
-      if (val >= 0) store.customGroups[gi][field] = val;
+      const cur = store.customGroups[gi][field];
+      const next = parseFloat((cur + delta).toFixed(2));
+      if (next < 0) return;
+      const clamped = clampTiming(gi, field, next);
+      if (clamped === cur) return;
+      saveUndoSnapshot('Nudge group ' + (gi + 1) + ' ' + field);
+      store.customGroups[gi][field] = clamped;
     }
 
     // ── Split at a specific word boundary ────────

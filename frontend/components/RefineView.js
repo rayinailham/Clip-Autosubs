@@ -18,8 +18,9 @@ export default {
     const pollTimer = ref(null);
     const sortMode = ref('newest');
 
-    const doCutSilence = ref(true);
     const doGrouping = ref(true);
+    const doDiarize = ref(false);
+    const numSpeakers = ref(null);
 
     const processedUploads = computed(() => {
       let list = [...uploads.value];
@@ -42,7 +43,7 @@ export default {
       return groups;
     });
 
-    const STEP_ORDER = ['init', 'transcribe', 'silence', 'analyze', 'apply', 'done'];
+    const STEP_ORDER = ['init', 'transcribe', 'analyze', 'apply', 'done'];
     const STEP_LABELS = computed(() => {
       let modelName = 'WhisperX';
       if (store.transcriptionModel === 'scribe_v2') modelName = 'ElevenLabs Scribe v2';
@@ -50,9 +51,8 @@ export default {
       return {
         init: 'Initializing…',
         transcribe: 'Transcribing with ' + modelName,
-        silence: 'Cutting silences',
         analyze: 'Analyzing with Gemini AI',
-        apply: 'Applying refinements',
+        apply: 'Applying subtitles',
         done: 'Complete!',
       };
     });
@@ -149,7 +149,8 @@ export default {
           gemini_api_key: apiKey.value.trim(),
           transcription_model: store.transcriptionModel,
           elevenlabs_api_key: store.transcriptionModel === 'scribe_v2' ? store.elevenlabsApiKey.trim() : null,
-          do_cut_silence: doCutSilence.value,
+          diarize: doDiarize.value,
+          num_speakers: doDiarize.value && numSpeakers.value > 0 ? parseInt(numSpeakers.value, 10) : null,
           do_grouping: doGrouping.value
         });
         store.refine.jobId = job_id;
@@ -192,7 +193,7 @@ export default {
       store.videoFilename = data.video_filename || '';
       store.metadata = data.metadata || {};
       store.speakers = data.speakers || {};
-      store.hiddenWordIndices = data.hidden_indices || [];
+      store.hiddenWordIndices = [];
 
       // Apply smart groups
       if (data.groups && data.groups.length > 0) {
@@ -200,7 +201,7 @@ export default {
           word_indices: g.word_indices,
           start: g.start,
           end: g.end,
-          speaker: g.speaker || 'SPEAKER_1',
+          speaker: g.speaker || (store.words[g.word_indices[0]] || {}).speaker || null,
         }));
         store.useCustomGroups = true;
       } else {
@@ -218,44 +219,6 @@ export default {
       store.redoStack = [];
       store.splitPoints = [];
       store.removedSegments = [];
-
-      // Apply wasted indices (boring parts) -> create cut segments
-      if (data.wasted_indices && data.wasted_indices.length > 0) {
-        let segments = [];
-        let cur = null;
-        let sorted = [...data.wasted_indices].sort((a,b) => a - b);
-        for (let i of sorted) {
-          let w = store.words[i];
-          if (!w) continue;
-          if (!cur) {
-             cur = { start: w.start, end: w.end };
-          } else if (w.start <= cur.end + 1.0) { // allow 1 sec gap to keep them continuous
-             cur.end = Math.max(cur.end, w.end);
-          } else {
-             segments.push(cur);
-             cur = { start: w.start, end: w.end };
-          }
-        }
-        if (cur) segments.push(cur);
-
-        let splits = new Set();
-        segments.forEach(seg => {
-          if (seg.start > 0.1) splits.add(parseFloat(seg.start.toFixed(3)));
-          splits.add(parseFloat(seg.end.toFixed(3)));
-        });
-        store.splitPoints = Array.from(splits).sort((a, b) => a - b);
-
-        const videoDur = (store.words[store.words.length - 1]?.end || 0) + 5;
-        const points = [0, ...store.splitPoints, videoDur];
-        for (let i = 0; i < points.length - 1; i++) {
-          const mid = (points[i] + points[i+1]) / 2;
-          const isWasted = segments.some(seg => mid >= seg.start && mid <= seg.end);
-          if (isWasted) {
-            store.removedSegments.push(i);
-          }
-        }
-      }
-
 
       // Navigate to editor
       store.appMode = 'subtitle';
@@ -307,7 +270,7 @@ export default {
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads, collapsedFolders, toggleFolder,
-      doCutSilence, doGrouping, deleteFile,
+      doGrouping, deleteFile,
     };
   },
   template: `
@@ -318,8 +281,8 @@ export default {
       <template v-if="step === 'setup'">
         <!-- Hero -->
         <div class="upload-hero">
-          <h2 style="font-weight:600; letter-spacing:-0.02em;">Auto-Refine</h2>
-          <p>Upload a vertical video and let AI do the rest: transcribing, fast silence cutting, and smart-grouping.</p>
+          <h2 style="font-weight:600; letter-spacing:-0.02em;">Auto Subtitle</h2>
+          <p>Upload a vertical video and let AI do the rest: transcribing and smart-grouping subtitles.</p>
         </div>
 
         <!-- Upload Card -->
@@ -378,16 +341,21 @@ export default {
 
         <!-- Options Checklist -->
         <div class="refine-options" style="max-width: 560px; width: 100%; margin-top: 1rem; background: var(--surface); padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
-          <h3 style="font-size: 0.9rem; margin-bottom: 0.8rem; color: var(--text-dim);">⚙️ Refinement Options</h3>
+          <h3 style="font-size: 0.9rem; margin-bottom: 0.8rem; color: var(--text-dim);">⚙️ Options</h3>
           <div style="display: flex; flex-direction: column; gap: 0.8rem;">
             <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
-              <input type="checkbox" v-model="doCutSilence" />
-              <span><strong>Cut Silences:</strong> Automatically remove awkward pauses and long gaps.</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
               <input type="checkbox" v-model="doGrouping" />
-              <span><strong>Proper Subtitling (AI):</strong> Group words into natural, easy-to-read subtitle chunks based on sentence boundaries.</span>
+              <span><strong>Smart Grouping (AI):</strong> Group words into natural, easy-to-read subtitle chunks based on sentence boundaries.</span>
             </label>
+            <label v-if="store.transcriptionModel === 'scribe_v2'" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer;">
+              <input type="checkbox" v-model="doDiarize" />
+              <span><strong>Diarize Speakers:</strong> Detect and label different speakers in the audio (ElevenLabs Scribe only).</span>
+            </label>
+            <div v-if="doDiarize && store.transcriptionModel === 'scribe_v2'" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-dim); padding-left: 1.6rem;">
+              <span>Speakers (optional hint, 1–32):</span>
+              <input type="number" min="1" max="32" v-model.number="numSpeakers" placeholder="auto"
+                     style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 80px;" />
+            </div>
           </div>
         </div>
 
@@ -397,7 +365,7 @@ export default {
                   :disabled="!canStart()"
                   :style="{ opacity: canStart() ? 1 : 0.5 }"
                   @click="startRefine">
-            Start Auto-Refine
+            Start Auto Subtitle
           </button>
         </div>
 
@@ -462,7 +430,7 @@ export default {
       <!-- PROCESSING STEP -->
       <div v-else-if="step === 'processing'" class="refine-processing" style="margin: 4rem auto; max-width: 560px; width: 100%;">
         <div class="upload-hero">
-          <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; font-weight:600; letter-spacing:-0.02em;">Refining your video…</h2>
+          <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem; font-weight:600; letter-spacing:-0.02em;">Generating subtitles…</h2>
           <p>This may take a few minutes. Don't close this tab.</p>
         </div>
 
@@ -491,15 +459,15 @@ export default {
       <!-- DONE STEP -->
       <div v-else-if="step === 'done'" class="refine-done" style="margin: 4rem auto; text-align: center; max-width: 500px;">
         <div class="refine-done-icon" style="font-size: 4rem; margin-bottom: 1rem;">🎉</div>
-        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--success); font-weight:600; letter-spacing:-0.02em;">Refine Complete</h2>
-        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 2rem;">Your video has been transcribed, silence-cut, speaker-identified, and smart-grouped.</p>
+        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: var(--success); font-weight:600; letter-spacing:-0.02em;">Subtitles Ready</h2>
+        <p style="color: var(--text-dim); line-height: 1.6; margin-bottom: 2rem;">Your video has been transcribed and smart-grouped.</p>
         <p class="refine-done-hint" style="color: var(--accent); font-weight: 600;">Opening in editor…</p>
       </div>
 
       <!-- ERROR STEP -->
       <div v-else-if="step === 'error'" class="refine-error" style="margin: 4rem auto; text-align: center; max-width: 500px;">
         <div class="refine-error-icon" style="font-size: 4rem; margin-bottom: 1rem;">⚠️</div>
-        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: #f44336;">Refine Failed</h2>
+        <h2 style="font-size: 1.8rem; margin-bottom: 1rem; color: #f44336;">Auto Subtitle Failed</h2>
         <p class="refine-error-msg" style="background: rgba(244,67,54,0.1); border: 1px solid rgba(244,67,54,0.2); padding: 1rem; border-radius: var(--radius); color: #ffcccc; margin-bottom: 2rem;">{{ error }}</p>
         <button class="btn btn-primary" style="background: var(--surface2); color: var(--text);" @click="reset">← Try Again</button>
       </div>

@@ -25,12 +25,13 @@ def transcribe_video(
     output_dir: Optional[str] = None,
     model_id: str = "scribe_v1",
     elevenlabs_api_key: Optional[str] = None,
-    # Legacy args kept for back-compat — ignored.
-    hf_token: Optional[str] = None,
-    min_speakers: Optional[int] = None,
-    max_speakers: Optional[int] = None,
-    diarize: Optional[bool] = None,
+    diarize: Optional[bool] = False,
+    num_speakers: Optional[int] = None,
     language_code: Optional[str] = None,
+    # Legacy aliases (whisperX-era). Mapped onto current params.
+    hf_token: Optional[str] = None,           # ignored — no whisperX
+    min_speakers: Optional[int] = None,       # mapped → num_speakers if set
+    max_speakers: Optional[int] = None,       # mapped → num_speakers if set
 ) -> dict:
     """
     Transcribe a video/audio file via ElevenLabs Scribe.
@@ -41,11 +42,18 @@ def transcribe_video(
         model_id: ElevenLabs STT model id (e.g. "scribe_v1").
         elevenlabs_api_key: ElevenLabs API key. Required.
         diarize: If True, ask the API to return speaker labels.
+        num_speakers: Optional hint for the exact number of speakers (1-32).
         language_code: Optional ISO language hint.
 
     Returns:
         dict with keys: words, metadata
     """
+    # Map legacy min/max → single num_speakers hint (use max if both set).
+    if num_speakers is None:
+        if max_speakers and max_speakers > 0:
+            num_speakers = int(max_speakers)
+        elif min_speakers and min_speakers > 0:
+            num_speakers = int(min_speakers)
     if not elevenlabs_api_key:
         raise RuntimeError(
             "ElevenLabs API key is required. Set it in the Settings page."
@@ -63,15 +71,17 @@ def transcribe_video(
     print(f"[transcribe] ElevenLabs Scribe ({model_id}) — {video_path.name}")
     t_start = time.time()
 
-    # ── Extract audio (mp3 128k) to keep upload small ─────────────────────
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+    # ── Extract audio (opus 96k mono) — keeps upload small but preserves
+    #    spectral detail needed for accurate speaker diarization. ─────────
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
         audio_path = tmp.name
     try:
         print("[transcribe] Extracting audio…")
         ff = subprocess.run(
             [
                 "ffmpeg", "-y", "-i", str(video_path),
-                "-vn", "-c:a", "libmp3lame", "-b:a", "128k",
+                "-vn", "-ac", "1", "-ar", "16000",
+                "-c:a", "libopus", "-b:a", "96k",
                 audio_path,
             ],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -88,12 +98,18 @@ def transcribe_video(
             "tag_audio_events": "false",
             "diarize": "true" if diarize else "false",
         }
+        if num_speakers and num_speakers > 0:
+            data["num_speakers"] = str(int(num_speakers))
         if language_code:
             data["language_code"] = language_code
 
-        print(f"[transcribe] Uploading {Path(audio_path).stat().st_size / 1e6:.1f}MB to ElevenLabs…")
+        print(
+            f"[transcribe] Uploading {Path(audio_path).stat().st_size / 1e6:.1f}MB "
+            f"to ElevenLabs (diarize={data['diarize']}, "
+            f"num_speakers={data.get('num_speakers', 'auto')})…"
+        )
         with open(audio_path, "rb") as f:
-            files = {"file": (Path(audio_path).name, f, "audio/mpeg")}
+            files = {"file": (Path(audio_path).name, f, "audio/ogg")}
             res = requests.post(
                 ELEVENLABS_STT_URL,
                 headers=headers,

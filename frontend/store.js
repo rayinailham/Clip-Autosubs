@@ -256,7 +256,11 @@ function restoreSnapshot(snapshot) {
   store.useCustomGroups = snapshot.useCustomGroups;
   store.useDynamicMode = snapshot.useDynamicMode;
   store.selectedWordIndices = new Set();
-  regenerateAutoGroups();
+  // Only auto-regenerate if we don't have any custom groups in the snapshot.
+  // Previously this clobbered the just-restored groups every time.
+  if (!store.useCustomGroups && store.customGroups.length === 0) {
+    regenerateAutoGroups();
+  }
 }
 
 export function saveUndoSnapshot(label) {
@@ -332,23 +336,33 @@ export function regenerateAutoGroups() {
       word_indices: Array.from({ length: chunk.length }, (_, j) => i + j),
       start: chunk[0].start,
       end: chunk[chunk.length - 1].end,
+      speaker: chunk[0].speaker || null,
     });
   }
 }
 
 export function getActiveGroups() {
+  const hidden = new Set(store.hiddenWordIndices || []);
   if (store.useCustomGroups) {
-    return store.customGroups.map(g => ({
-      words: g.word_indices.map(i => store.words[i]).filter(Boolean),
-      start: g.start,
-      end: g.end,
-      speaker: g.speaker || (store.words[g.word_indices[0]] || {}).speaker || null,
-    }));
+    const out = [];
+    for (const g of store.customGroups) {
+      const indices = g.word_indices.filter(i => !hidden.has(i));
+      const words = indices.map(i => store.words[i]).filter(Boolean);
+      if (words.length === 0) continue;
+      out.push({
+        words,
+        start: g.start,
+        end: g.end,
+        speaker: g.speaker || (store.words[indices[0]] || {}).speaker || null,
+      });
+    }
+    return out;
   }
   const wpg = store.style.wpg || 4;
   const groups = [];
-  for (let i = 0; i < store.words.length; i += wpg) {
-    const chunk = store.words.slice(i, i + wpg);
+  const visibleWords = store.words.filter((_, i) => !hidden.has(i));
+  for (let i = 0; i < visibleWords.length; i += wpg) {
+    const chunk = visibleWords.slice(i, i + wpg);
     if (chunk.length === 0) continue;
     groups.push({
       words: chunk,
