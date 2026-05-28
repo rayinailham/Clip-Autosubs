@@ -180,6 +180,13 @@ const store = reactive({
   // ── Speaker data ──────────────────────────
   speakers: {},          // e.g. { SPEAKER_1: 'Host', SPEAKER_2: 'Guest' }
   hiddenWordIndices: [], // word indices to hide (overlapping speech)
+
+  // ── Speaker avatar/box overlay config ─────
+  // Map speaker_id → { enabled, avatar, label, pos_x, pos_y, bg_color, ... }
+  // When `enabled` is true, the subtitle for that speaker is rendered as an
+  // avatar + rounded dialog box at the configured position instead of using
+  // the global subtitle position.
+  speakerConfig: {},
 });
 
 export default store;

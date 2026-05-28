@@ -2,14 +2,16 @@ import { ref } from 'vue';
 import store, { getSegments } from '../store.js';
 import { exportSrt } from '../api.js';
 import StyleSidebar from './StyleSidebar.js';
+import SpeakersSidebar from './SpeakersSidebar.js';
 
 export default {
   name: 'EditorSidebar',
-  components: { StyleSidebar },
+  components: { StyleSidebar, SpeakersSidebar },
   emits: ['render'],
   setup(_, { emit }) {
     const srtBusy = ref(false);
     const srtMsg = ref('');
+    const activeTab = ref('style'); // 'style' | 'speakers'
 
     function handleRender() { emit('render'); }
 
@@ -62,15 +64,17 @@ export default {
       }
     }
 
-    return { store, handleRender, handleExportSrt, srtBusy, srtMsg };
+    return { store, handleRender, handleExportSrt, srtBusy, srtMsg, activeTab };
   },
   template: `
     <div class="sidebar right-sidebar">
-      <div class="sidebar-header">
-        <span class="sidebar-header-title">🎨 Style</span>
+      <div class="sidebar-header sidebar-tabs">
+        <button class="sidebar-tab" :class="{ active: activeTab === 'style' }" @click="activeTab = 'style'">🎨 Style</button>
+        <button class="sidebar-tab" :class="{ active: activeTab === 'speakers' }" @click="activeTab = 'speakers'">🗣 Speakers</button>
       </div>
       <div class="sidebar-content">
-        <StyleSidebar />
+        <StyleSidebar v-show="activeTab === 'style'" />
+        <SpeakersSidebar v-show="activeTab === 'speakers'" />
       </div>
       <div class="sidebar-footer">
         <button class="btn btn-outline btn-sm"

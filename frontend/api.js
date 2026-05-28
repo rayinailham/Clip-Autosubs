@@ -102,6 +102,37 @@ export function videoURL(filename) {
   return '/video/' + encodeURIComponent(filename);
 }
 
+// ── Speaker avatars ─────────────────────────────────────────
+
+export async function uploadAvatar(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/avatars', { method: 'POST', body: formData });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Avatar upload failed');
+  }
+  return res.json();
+}
+
+export async function listAvatars() {
+  const res = await fetch('/avatars');
+  return res.json();
+}
+
+export async function deleteAvatar(filename) {
+  const res = await fetch('/avatars/' + encodeURIComponent(filename), { method: 'DELETE' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Delete avatar failed');
+  }
+  return res.json();
+}
+
+export function avatarURL(filename) {
+  return '/avatars/' + encodeURIComponent(filename);
+}
+
 // ── VTuber Reframe ──────────────────────────────────────────
 
 export async function uploadVideoOnly(file) {

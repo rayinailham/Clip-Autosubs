@@ -50,11 +50,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "outputs"
 RENDERED_DIR = BASE_DIR / "rendered"
+AVATAR_DIR = UPLOAD_DIR / "avatars"
 FRONTEND_DIR = BASE_DIR / "frontend"
 
 UPLOAD_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 RENDERED_DIR.mkdir(exist_ok=True)
+AVATAR_DIR.mkdir(exist_ok=True)
 
 # ─── App ─────────────────────────────────────────────────────
 app = FastAPI(title="Clipping Project", version="2.0.0")
@@ -242,12 +244,34 @@ class ReframeRequest(BaseModel):
     preset: str = "medium"
 
 
+class SpeakerEntry(BaseModel):
+    """Per-speaker avatar + dialog-box config."""
+    avatar: Optional[str] = None       # filename inside uploads/avatars/
+    label: Optional[str] = None        # display label, e.g. 'Host'
+    enabled: bool = False              # if True, render avatar+box for this speaker
+    pos_x: int = 50                    # 0-100 % horizontal center of the box
+    pos_y: int = 85                    # 0-100 % vertical center of the box
+    bg_color: str = "FFFFFF"           # box background hex (no #)
+    bg_alpha: float = 0.92             # box background opacity 0..1
+    text_color: str = "111111"         # text hex (no #)
+    border_color: str = "000000"
+    border_width: int = 0
+    box_scale: float = 1.0             # multiplier on the default box size
+    avatar_size: int = 120             # avatar diameter in px @ 1080p reference
+
+
+class SpeakersConfig(BaseModel):
+    """Map of speaker_id (e.g. SPEAKER_00) → SpeakerEntry."""
+    entries: dict[str, SpeakerEntry] = {}
+
+
 class RenderRequest(BaseModel):
     video_filename: str
     words: list[WordItem]
     word_groups: Optional[list[WordGroup]] = None  # Custom groups with timing control
     style: StyleConfig = StyleConfig()
     active_segments: Optional[list[list[float]]] = None  # [[start, end], ...] segments to keep
+    speakers: Optional[SpeakersConfig] = None       # per-speaker avatar+box config
 
 
 class TrimRequest(BaseModel):
@@ -394,6 +418,82 @@ async def serve_video(filename: str):
 # ─── Phase 2-4: Render with Subtitles ───────────────────────
 
 
+# ─── Speaker avatars ────────────────────────────────────────
+
+ALLOWED_AVATAR_EXT = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+
+
+@app.post("/avatars")
+async def upload_avatar(file: UploadFile = File(...)):
+    """Upload an avatar image for a speaker. Returns the saved filename + URL."""
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_AVATAR_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported avatar type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_AVATAR_EXT))}",
+        )
+    # Sanitize: drop path parts, prepend short unique id to avoid collisions.
+    base_name = Path(file.filename).name
+    unique = uuid.uuid4().hex[:8]
+    safe_name = f"{unique}_{base_name}"
+    dest = AVATAR_DIR / safe_name
+    try:
+        with open(dest, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save avatar: {e}")
+    finally:
+        await file.close()
+    size_kb = round(dest.stat().st_size / 1024, 1)
+    return {
+        "filename": safe_name,
+        "url": f"/avatars/{safe_name}",
+        "size_kb": size_kb,
+    }
+
+
+@app.get("/avatars/{filename:path}")
+async def serve_avatar(filename: str):
+    """Serve an uploaded avatar image."""
+    file_path = AVATAR_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    media_types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif",
+    }
+    ext = file_path.suffix.lower()
+    return FileResponse(file_path, media_type=media_types.get(ext, "image/png"))
+
+
+@app.get("/avatars")
+async def list_avatars():
+    """List uploaded avatar images."""
+    files = []
+    for f in AVATAR_DIR.iterdir():
+        if f.is_file() and f.suffix.lower() in ALLOWED_AVATAR_EXT:
+            files.append({
+                "filename": f.name,
+                "url": f"/avatars/{f.name}",
+                "size_kb": round(f.stat().st_size / 1024, 1),
+            })
+    files.sort(key=lambda x: x["filename"])
+    return {"files": files}
+
+
+@app.delete("/avatars/{filename:path}")
+async def delete_avatar(filename: str):
+    """Delete an avatar image."""
+    file_path = AVATAR_DIR / filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    try:
+        file_path.unlink()
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not delete avatar: {e}")
+    return {"deleted": filename}
+
+
 def _remap_time(t: float, segments: list[tuple[float, float]]) -> float:
     """Map a timestamp from the original video to the cut video's timeline."""
     offset = 0.0
@@ -497,7 +597,8 @@ def _do_render(render_id: str, req: RenderRequest):
             groups=final_groups,
             style=req.style.model_dump(),
             width=info["width"],
-            height=info["height"]
+            height=info["height"],
+            speakers=req.speakers.model_dump() if req.speakers else None,
         )
 
         render_jobs[render_id]["status"] = "rendering"

@@ -8,10 +8,19 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 
-def generate_subtitle_html(words, groups, style, width, height):
-    """Generates a standalone HTML file that perfectly mimics the frontend subtitle rendering."""
-    
+def generate_subtitle_html(words, groups, style, width, height, speakers=None):
+    """Generates a standalone HTML file that perfectly mimics the frontend subtitle rendering.
+
+    `speakers` is the SpeakersConfig dict — { entries: { speaker_id: { ... } } }.
+    Each enabled entry renders an avatar + dialog box at its configured pos_x/pos_y
+    instead of using the global subtitle position.
+    """
+
     style_css_url = (FRONTEND_DIR / "style.css").resolve().as_uri()
+    speakers_json = json.dumps(speakers or {"entries": {}})
+    # Avatars live under uploads/avatars/. Burned renders run via file:// in
+    # Playwright, so we need an absolute file URI base instead of /avatars/.
+    avatars_base = (BASE_DIR / "uploads" / "avatars").resolve().as_uri()
     
     # Provide the style object and the data
     html = f"""<!DOCTYPE html>
@@ -54,6 +63,8 @@ def generate_subtitle_html(words, groups, style, width, height):
     window.WORDS = {json.dumps(words)};
     window.GROUPS = {json.dumps(groups)};
     window.STYLE = {json.dumps(style)};
+    window.SPEAKERS = {speakers_json};
+    window.AVATARS_BASE = {json.dumps(avatars_base)};
     
     // We recreate VideoPanel.js logic inside this autonomous page
     const s = window.STYLE;
@@ -139,6 +150,103 @@ def generate_subtitle_html(words, groups, style, width, height):
     animWrapper.id = 'subtitle-anim-wrapper';
     posWrapper.appendChild(animWrapper);
 
+    // ── Speaker avatar+box layout ────────────────────────────
+    const SPK = (window.SPEAKERS && window.SPEAKERS.entries) || {{}};
+    const REF_HEIGHT = 1080;
+    const refRatio = displayedHeight / REF_HEIGHT;
+    let avatarEl = null;
+    let lastSpeakerId = null;
+
+    function ensureAvatar() {{
+      if (avatarEl) return avatarEl;
+      avatarEl = document.createElement('img');
+      avatarEl.id = 'subtitle-speaker-avatar';
+      avatarEl.style.borderRadius = '50%';
+      avatarEl.style.objectFit = 'cover';
+      avatarEl.style.flexShrink = '0';
+      avatarEl.style.display = 'block';
+      return avatarEl;
+    }}
+
+    function hexToCss(c, fallback) {{
+      if (!c) return fallback;
+      return c.startsWith('#') ? c : '#' + c;
+    }}
+
+    function applySpeakerLayout(speakerId) {{
+      if (speakerId === lastSpeakerId) return;
+      lastSpeakerId = speakerId;
+      const cfg = speakerId ? SPK[speakerId] : null;
+      const enabled = cfg && cfg.enabled;
+      if (enabled) {{
+        const px = cfg.pos_x != null ? cfg.pos_x : 50;
+        const py = cfg.pos_y != null ? cfg.pos_y : 85;
+        posWrapper.style.left = px + '%';
+        posWrapper.style.top = py + '%';
+        posWrapper.style.transform = 'translate(-50%, -50%)';
+        const bgHex = hexToCss(cfg.bg_color, '#FFFFFF');
+        const alpha = cfg.bg_alpha != null ? cfg.bg_alpha : 0.92;
+        const bdHex = hexToCss(cfg.border_color, '#000000');
+        const bdW = cfg.border_width || 0;
+        const scaleK = cfg.box_scale || 1.0;
+        const padPx = Math.round(20 * refRatio * scaleK);
+        const radiusPx = Math.round(28 * refRatio * scaleK);
+        const gapPx = Math.round(16 * refRatio * scaleK);
+        // Convert hex bg to rgba w/ alpha
+        const r = parseInt(bgHex.slice(1, 3), 16) || 255;
+        const g = parseInt(bgHex.slice(3, 5), 16) || 255;
+        const b = parseInt(bgHex.slice(5, 7), 16) || 255;
+        posWrapper.style.background = 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+        posWrapper.style.border = bdW > 0 ? (Math.round(bdW * refRatio) + 'px solid ' + bdHex) : 'none';
+        posWrapper.style.borderRadius = radiusPx + 'px';
+        posWrapper.style.padding = padPx + 'px ' + Math.round(padPx * 1.2) + 'px';
+        posWrapper.style.display = 'flex';
+        posWrapper.style.alignItems = 'center';
+        posWrapper.style.gap = gapPx + 'px';
+        posWrapper.style.maxWidth = '70%';
+        posWrapper.style.boxShadow = '0 ' + Math.round(8 * refRatio) + 'px ' + Math.round(28 * refRatio) + 'px rgba(0,0,0,0.35)';
+        // Avatar
+        const av = ensureAvatar();
+        const avSize = Math.round((cfg.avatar_size || 120) * refRatio);
+        av.style.width = avSize + 'px';
+        av.style.height = avSize + 'px';
+        av.style.border = Math.max(2, Math.round(3 * refRatio)) + 'px solid ' + bgHex;
+        if (cfg.avatar) {{
+          const url = (window.AVATARS_BASE || '/avatars') + '/' + cfg.avatar;
+          if (av.getAttribute('data-src') !== url) {{
+            av.setAttribute('data-src', url);
+            av.src = url;
+          }}
+          if (av.parentElement !== posWrapper) {{
+            posWrapper.insertBefore(av, posWrapper.firstChild);
+          }}
+        }} else if (av.parentElement) {{
+          av.parentElement.removeChild(av);
+        }}
+        // Override text color to speaker text color
+        const tc = hexToCss(cfg.text_color, '#111111');
+        animWrapper.style.color = tc;
+        animWrapper.style.flex = '1 1 auto';
+      }} else {{
+        // Reset to global subtitle layout
+        posWrapper.style.left = posX + '%';
+        posWrapper.style.top = posY + '%';
+        posWrapper.style.transform = 'translate(-50%, -50%)';
+        posWrapper.style.background = '';
+        posWrapper.style.border = '';
+        posWrapper.style.borderRadius = '';
+        posWrapper.style.padding = '';
+        posWrapper.style.display = '';
+        posWrapper.style.alignItems = '';
+        posWrapper.style.gap = '';
+        posWrapper.style.maxWidth = '90%';
+        posWrapper.style.boxShadow = '';
+        animWrapper.style.color = '';
+        animWrapper.style.flex = '';
+        if (avatarEl && avatarEl.parentElement) avatarEl.parentElement.removeChild(avatarEl);
+      }}
+    }}
+
     let lastGroupKey = null;
 
     window.ANIM_MS = Math.max(s.anim_speed || 200, s.static_anim_speed || 300);
@@ -149,12 +257,17 @@ def generate_subtitle_html(words, groups, style, width, height):
         if (t >= g.start && t <= g.end + 0.15) {{ activeGroup = g; break; }}
       }}
       if (!activeGroup) {{
+        applySpeakerLayout(null);
         if (lastGroupKey === null && animWrapper.innerHTML === '') return false;
         animWrapper.innerHTML = '';
         lastGroupKey = null;
         animWrapper.dataset.last = '';
         return "frame";
       }}
+
+      // Apply speaker-specific layout (avatar + dialog box) if configured.
+      // Falls back to the global subtitle layout when speaker is null/disabled.
+      applySpeakerLayout(activeGroup.speaker || null);
       
       let activeIdx = -1;
       for (let i = 0; i < activeGroup.words.length; i++) {{

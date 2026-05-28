@@ -1,6 +1,6 @@
 import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import store, { getActiveGroups, getSegments } from '../store.js';
-import { videoURL } from '../api.js';
+import { videoURL, avatarURL } from '../api.js';
 
 export default {
   name: 'VideoPanel',
@@ -140,6 +140,13 @@ export default {
       preview.style.alignItems = '';
       preview.style.justifyContent = '';
 
+      // ── Resolve speaker config for the active group ───────────
+      // When a speaker has `enabled: true` in store.speakerConfig, render the
+      // subtitle as an avatar + rounded dialog box at the speaker's position
+      // instead of using the global subtitle position.
+      const REF_HEIGHT_FOR_SPK = 1080;
+      const refRatio = displayedHeight / REF_HEIGHT_FOR_SPK;
+
       if (!activeGroup) {
         const pw = preview.querySelector('#subtitle-pos-wrapper');
         if (pw) pw.innerHTML = '';
@@ -184,10 +191,78 @@ export default {
         posWrapper.style.maxWidth = '90%';
         preview.appendChild(posWrapper);
       }
-      // Update position
-      posWrapper.style.left = posX + '%';
-      posWrapper.style.top = posY + '%';
-      posWrapper.style.transform = 'translate(-50%, -50%)';
+
+      // ── Apply speaker avatar+box layout (or reset to global) ──
+      const spkId = activeGroup.speaker || null;
+      const spkCfg = spkId ? store.speakerConfig[spkId] : null;
+      const spkOn = !!(spkCfg && spkCfg.enabled);
+      let avatarEl = posWrapper.querySelector('#subtitle-speaker-avatar');
+      if (spkOn) {
+        const px = spkCfg.pos_x != null ? spkCfg.pos_x : 50;
+        const py = spkCfg.pos_y != null ? spkCfg.pos_y : 85;
+        posWrapper.style.left = px + '%';
+        posWrapper.style.top = py + '%';
+        posWrapper.style.transform = 'translate(-50%, -50%)';
+        const bgHex = spkCfg.bg_color || '#FFFFFF';
+        const alpha = spkCfg.bg_alpha != null ? spkCfg.bg_alpha : 0.92;
+        const r = parseInt(bgHex.slice(1, 3), 16) || 255;
+        const g = parseInt(bgHex.slice(3, 5), 16) || 255;
+        const b = parseInt(bgHex.slice(5, 7), 16) || 255;
+        const scaleK = spkCfg.box_scale || 1.0;
+        const padPx = Math.round(20 * refRatio * scaleK);
+        const radiusPx = Math.round(28 * refRatio * scaleK);
+        const gapPx = Math.round(16 * refRatio * scaleK);
+        posWrapper.style.background = `rgba(${r},${g},${b},${alpha})`;
+        posWrapper.style.border = (spkCfg.border_width || 0) > 0
+          ? `${Math.round(spkCfg.border_width * refRatio)}px solid ${spkCfg.border_color || '#000'}`
+          : 'none';
+        posWrapper.style.borderRadius = radiusPx + 'px';
+        posWrapper.style.padding = `${padPx}px ${Math.round(padPx * 1.2)}px`;
+        posWrapper.style.display = 'flex';
+        posWrapper.style.alignItems = 'center';
+        posWrapper.style.gap = gapPx + 'px';
+        posWrapper.style.maxWidth = '70%';
+        posWrapper.style.boxShadow = `0 ${Math.round(8 * refRatio)}px ${Math.round(28 * refRatio)}px rgba(0,0,0,0.35)`;
+        // Avatar element
+        if (spkCfg.avatar) {
+          if (!avatarEl) {
+            avatarEl = document.createElement('img');
+            avatarEl.id = 'subtitle-speaker-avatar';
+            avatarEl.style.borderRadius = '50%';
+            avatarEl.style.objectFit = 'cover';
+            avatarEl.style.flexShrink = '0';
+          }
+          const avSize = Math.round((spkCfg.avatar_size || 120) * refRatio);
+          avatarEl.style.width = avSize + 'px';
+          avatarEl.style.height = avSize + 'px';
+          avatarEl.style.border = `${Math.max(2, Math.round(3 * refRatio))}px solid ${bgHex}`;
+          const url = avatarURL(spkCfg.avatar);
+          if (avatarEl.getAttribute('data-src') !== url) {
+            avatarEl.setAttribute('data-src', url);
+            avatarEl.src = url;
+          }
+          if (avatarEl.parentElement !== posWrapper) {
+            posWrapper.insertBefore(avatarEl, posWrapper.firstChild);
+          }
+        } else if (avatarEl) {
+          avatarEl.remove();
+        }
+      } else {
+        // Reset to global subtitle layout
+        posWrapper.style.left = posX + '%';
+        posWrapper.style.top = posY + '%';
+        posWrapper.style.transform = 'translate(-50%, -50%)';
+        posWrapper.style.background = '';
+        posWrapper.style.border = '';
+        posWrapper.style.borderRadius = '';
+        posWrapper.style.padding = '';
+        posWrapper.style.display = '';
+        posWrapper.style.alignItems = '';
+        posWrapper.style.gap = '';
+        posWrapper.style.maxWidth = '90%';
+        posWrapper.style.boxShadow = '';
+        if (avatarEl) avatarEl.remove();
+      }
 
       // ── All animation class names so we can clean them off the container ──
       const ALL_ANIM_CLASSES = [
@@ -196,6 +271,25 @@ export default {
         'subtitle-anim-bounce','subtitle-anim-blur-in','subtitle-anim-stretch',
         'subtitle-anim-zoom-drop','subtitle-anim-flip-in',
       ];
+
+      // ── Ensure animation wrapper inside posWrapper ─────────
+      // Created here (instead of inside dynamic-mode branch) so static-mode
+      // innerHTML writes don't wipe the speaker avatar element above.
+      let animWrapper = posWrapper.querySelector('#subtitle-anim-wrapper');
+      if (!animWrapper) {
+        animWrapper = document.createElement('div');
+        animWrapper.id = 'subtitle-anim-wrapper';
+        posWrapper.appendChild(animWrapper);
+      }
+      // When speaker box is active, give animWrapper its own text color +
+      // flex sizing so the box layout stays balanced next to the avatar.
+      if (spkOn) {
+        animWrapper.style.color = spkCfg.text_color || '#111111';
+        animWrapper.style.flex = '1 1 auto';
+      } else {
+        animWrapper.style.color = '';
+        animWrapper.style.flex = '';
+      }
 
       // Static mode
       if (!store.useDynamicMode) {
@@ -208,21 +302,22 @@ export default {
           const animSpeedMs = store.style.staticAnimSpeed || 300;
           const animSpeed = animSpeedMs + 'ms';
           const animIntensity = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
-          const baseStyle = `color:${textColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${textShadow}; --anim-intensity:${animIntensity}`;
+          const baseColor = spkOn ? (spkCfg.text_color || '#111111') : textColor;
+          const baseStyle = `color:${baseColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${spkOn ? 'none' : textShadow}; --anim-intensity:${animIntensity}`;
 
           if (animName === 'typewriter') {
             const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
-            posWrapper.innerHTML = words.map((word, i) =>
+            animWrapper.innerHTML = words.map((word, i) =>
               `<span class="subtitle-word subtitle-anim-fade-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
             ).join(' ');
           } else if (animName === 'cascade') {
             const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
-            posWrapper.innerHTML = words.map((word, i) =>
+            animWrapper.innerHTML = words.map((word, i) =>
               `<span class="subtitle-word subtitle-anim-pop-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
             ).join(' ');
           } else {
             const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
-            posWrapper.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
+            animWrapper.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
           }
         }
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
@@ -232,14 +327,6 @@ export default {
       // Dynamic mode — track group changes for entrance animations
       const dynamicGroupKey = activeGroup.start + '_' + activeGroup.end;
       const isNewGroup = dynamicGroupKey !== lastGroupKey;
-
-      // Ensure animation wrapper inside posWrapper
-      let animWrapper = posWrapper.querySelector('#subtitle-anim-wrapper');
-      if (!animWrapper) {
-        animWrapper = document.createElement('div');
-        animWrapper.id = 'subtitle-anim-wrapper';
-        posWrapper.appendChild(animWrapper);
-      }
 
       if (isNewGroup) {
         lastGroupKey = dynamicGroupKey;

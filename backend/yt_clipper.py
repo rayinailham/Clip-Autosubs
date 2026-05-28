@@ -1380,13 +1380,25 @@ def download_video(
     for c_idx, cookie_opt in enumerate(cookie_opts):
         try:
             ydl_opts = {
-                # Match the user's preferred yt-dlp command:
-                #   bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[ext=mp4]
-                # No height cap — take the highest avc1+mp4a available, with
-                # b[ext=mp4] as a single-file fallback. avc1+mp4a is chosen
-                # over VP9/AV1 because it muxes cleanly into MP4 without
-                # re-encode and plays everywhere.
-                "format": "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[ext=mp4]",
+                # Format selection — prioritize MAX resolution, never trap
+                # into 360p progressive MP4.
+                #
+                # Chain (best → worst):
+                #   1. AVC1 + M4A   — clean MP4 mux, no transcode, plays everywhere.
+                #                     Available up to 1080p on most videos.
+                #   2. ANY bv* + ba — covers VP9/AV1 high-res (1440p/2160p/HDR).
+                #                     ffmpeg remuxes into MP4 container.
+                #   3. b            — single-file fallback (last resort).
+                #
+                # `format_sort` forces highest resolution → fps → bitrate
+                # before codec preference, so we never silently downgrade.
+                "format": (
+                    "bv*[vcodec^=avc1][ext=mp4]+ba[acodec^=mp4a][ext=m4a]"
+                    "/bv*[ext=mp4]+ba[ext=m4a]"
+                    "/bv*+ba"
+                    "/b"
+                ),
+                "format_sort": ["res", "fps", "vbr", "abr"],
                 "merge_output_format": "mp4",
                 "outtmpl": outtmpl,
                 "quiet": True,

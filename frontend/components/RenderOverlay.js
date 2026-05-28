@@ -32,6 +32,33 @@ export default {
         if (store.useCustomGroups && store.customGroups.length > 0) {
           payload.word_groups = store.customGroups;
         }
+        // ── Speaker avatar/box overlay config ──
+        // Convert hex strings to backend format (no '#').
+        if (store.speakerConfig && Object.keys(store.speakerConfig).length > 0) {
+          const entries = {};
+          let anyEnabled = false;
+          for (const [spkId, cfg] of Object.entries(store.speakerConfig)) {
+            if (!cfg) continue;
+            anyEnabled = anyEnabled || !!cfg.enabled;
+            entries[spkId] = {
+              enabled: !!cfg.enabled,
+              avatar: cfg.avatar || null,
+              label: cfg.label || null,
+              pos_x: cfg.pos_x != null ? cfg.pos_x : 50,
+              pos_y: cfg.pos_y != null ? cfg.pos_y : 85,
+              bg_color: (cfg.bg_color || '#FFFFFF').replace('#', ''),
+              bg_alpha: cfg.bg_alpha != null ? cfg.bg_alpha : 0.92,
+              text_color: (cfg.text_color || '#111111').replace('#', ''),
+              border_color: (cfg.border_color || '#000000').replace('#', ''),
+              border_width: cfg.border_width || 0,
+              box_scale: cfg.box_scale || 1.0,
+              avatar_size: cfg.avatar_size || 120,
+            };
+          }
+          if (anyEnabled) {
+            payload.speakers = { entries };
+          }
+        }
         // Include timeline cuts if any segments are removed
         if (store.splitPoints.length > 0 && store.removedSegments.length > 0) {
           const v = document.getElementById('editor-video');
