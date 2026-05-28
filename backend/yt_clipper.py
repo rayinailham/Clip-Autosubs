@@ -1380,21 +1380,25 @@ def download_video(
     for c_idx, cookie_opt in enumerate(cookie_opts):
         try:
             ydl_opts = {
-                # Prefer 1080p (any codec: avc1/vp9/av1), then merge into MP4 container.
-                # Filtering [ext=mp4] alone caps at 720p because YouTube serves 1080p as VP9/AV1 in webm.
-                "format": (
-                    "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/"
-                    "bestvideo[height<=1080]+bestaudio/"
-                    "best[height<=1080]/best"
-                ),
+                # Match the user's preferred yt-dlp command:
+                #   bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[ext=mp4]
+                # No height cap — take the highest avc1+mp4a available, with
+                # b[ext=mp4] as a single-file fallback. avc1+mp4a is chosen
+                # over VP9/AV1 because it muxes cleanly into MP4 without
+                # re-encode and plays everywhere.
+                "format": "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/b[ext=mp4]",
                 "merge_output_format": "mp4",
                 "outtmpl": outtmpl,
                 "quiet": True,
                 "no_warnings": True,
                 "logger": _SilentLogger(),
                 "progress_hooks": [_ProgressHook()],
-                "concurrent_fragment_downloads": 5,
+                "concurrent_fragment_downloads": 16,
                 "continuedl": True,
+                "postprocessors": [{
+                    "key": "FFmpegMetadata",
+                    "add_metadata": True,
+                }],
                 "external_downloader_args": {"ffmpeg": ["-rw_timeout", "15000000"]}, # 15s timeout to prevent hang
             }
             if clip_range:
@@ -1439,15 +1443,85 @@ def cut_clip(
     start: float,
     end: float,
     output_path: Path,
+    progress_cb=None,
 ) -> Path:
     """
-    Cut a clip from source_video [start, end] (seconds) and save to output_path.
-    Uses FFmpeg with h264_nvenc for speed, falling back to libx264.
+    Cut a clip from source_video [start, end] (seconds) → output_path.
+
+    Strategy (fastest path first):
+      1. Stream copy (-c copy): instant, no re-encode, no quality loss.
+         Snaps the start to the nearest keyframe at-or-before the requested
+         second (typically ≤2s slack — fine because Gemini-picked clips
+         already include setup walkback).
+      2. h264_nvenc re-encode (audio copy) if stream copy fails.
+      3. libx264 CPU fallback if NVENC is unavailable.
+
+    progress_cb(pct: int) is called with 0..100 for this clip's progress
+    when ffmpeg emits -progress pipe:1 events.
     """
+    import threading
+
     duration = end - start
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    # Try GPU NVENC first
+    duration_us = max(1, int(duration * 1_000_000))
+
+    def _run_with_progress(cmd: list) -> tuple[int, str]:
+        """Run ffmpeg, parse -progress pipe:1 from stdout. Returns (rc, stderr_tail)."""
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        stderr_lines: list[str] = []
+
+        def _drain_stderr():
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                stderr_lines.append(line)
+
+        t = threading.Thread(target=_drain_stderr, daemon=True)
+        t.start()
+
+        if proc.stdout:
+            for line in proc.stdout:
+                line = line.strip()
+                if line.startswith("out_time_us=") and progress_cb:
+                    try:
+                        out_us = int(line.split("=", 1)[1])
+                        pct = max(0, min(99, int(out_us / duration_us * 100)))
+                        progress_cb(pct)
+                    except (ValueError, ZeroDivisionError):
+                        pass
+                elif line == "progress=end" and progress_cb:
+                    progress_cb(100)
+        proc.wait()
+        t.join(timeout=2)
+        return proc.returncode, "".join(stderr_lines[-40:])
+
+    # ── 1) Stream copy: instant, no re-encode ────────────────────────────
+    cmd_copy = [
+        "ffmpeg", "-y",
+        "-ss", _seconds_to_ffmpeg_ts(start),
+        "-i", str(source_video),
+        "-t", _seconds_to_ffmpeg_ts(duration),
+        "-c", "copy",
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
+        "-progress", "pipe:1",
+        "-nostats",
+        str(output_path),
+    ]
+    rc, err = _run_with_progress(cmd_copy)
+    if rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
+        return output_path
+
+    log.warning("Stream copy failed, falling back to NVENC re-encode. stderr tail:\n%s", err)
+
+    # ── 2) NVENC fallback (audio copy to preserve quality + speed) ───────
     cmd_gpu = [
         "ffmpeg", "-y",
         "-ss", _seconds_to_ffmpeg_ts(start),
@@ -1456,37 +1530,40 @@ def cut_clip(
         "-c:v", "h264_nvenc",
         "-cq", "18",
         "-preset", "p4",
-        "-c:a", "aac",
-        "-b:a", "192k",
+        "-c:a", "copy",
         "-avoid_negative_ts", "make_zero",
         "-movflags", "+faststart",
+        "-progress", "pipe:1",
+        "-nostats",
         str(output_path),
     ]
-    result = subprocess.run(cmd_gpu, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    
-    if result.returncode != 0:
-        if "h264_nvenc" in result.stderr or "Unknown encoder" in result.stderr:
-            # Fallback to software encoding
-            cmd_cpu = [
-                "ffmpeg", "-y",
-                "-ss", _seconds_to_ffmpeg_ts(start),
-                "-i", str(source_video),
-                "-t", _seconds_to_ffmpeg_ts(duration),
-                "-c:v", "libx264",
-                "-crf", "18",
-                "-preset", "fast",
-                "-c:a", "aac",
-                "-b:a", "192k",
-                "-avoid_negative_ts", "make_zero",
-                "-movflags", "+faststart",
-                str(output_path),
-            ]
-            result = subprocess.run(cmd_cpu, capture_output=True, text=True, encoding="utf-8", errors="replace")
-            if result.returncode != 0:
-                raise RuntimeError(f"FFmpeg error cutting clip (CPU fallback):\n{result.stderr[-1000:]}")
-        else:
-            raise RuntimeError(f"FFmpeg error cutting clip:\n{result.stderr[-1000:]}")
-            
+    rc, err = _run_with_progress(cmd_gpu)
+    if rc == 0 and output_path.exists() and output_path.stat().st_size > 0:
+        return output_path
+
+    if "h264_nvenc" not in err and "Unknown encoder" not in err:
+        raise RuntimeError(f"FFmpeg error cutting clip:\n{err}")
+
+    # ── 3) CPU libx264 fallback ──────────────────────────────────────────
+    cmd_cpu = [
+        "ffmpeg", "-y",
+        "-ss", _seconds_to_ffmpeg_ts(start),
+        "-i", str(source_video),
+        "-t", _seconds_to_ffmpeg_ts(duration),
+        "-c:v", "libx264",
+        "-crf", "18",
+        "-preset", "fast",
+        "-c:a", "copy",
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
+        "-progress", "pipe:1",
+        "-nostats",
+        str(output_path),
+    ]
+    rc, err = _run_with_progress(cmd_cpu)
+    if rc != 0:
+        raise RuntimeError(f"FFmpeg error cutting clip (CPU fallback):\n{err}")
+
     return output_path
 
 
@@ -1556,24 +1633,38 @@ def download_and_cut_clips(
     # Stage 3: Cut clips locally
     results = []
     total_clips = len(clips)
+    # Cut phase occupies progress 50→100. Each clip owns a slice of width
+    # (50 / total_clips). Per-clip ffmpeg progress maps 0..100 into that slice.
+    cut_slice = 50.0 / max(1, total_clips)
+
     for i, clip in enumerate(clips):
         safe_title = re.sub(r'[<>:"/\\|?*]', "", clip["title"])[:50].strip()
         safe_title = re.sub(r"\s+", "_", safe_title)
         filename_stem = f"yt_{clip['id']:02d}_{safe_title}"
-        
+
         target_filename = f"{filename_stem}{full_video_path.suffix}"
         out_path = folder_path / target_filename
 
         log.info("Cutting clip: %ss - %ss into %s",
                  clip['start'], clip['end'], filename_stem)
+
+        clip_base_pct = 50 + (i * cut_slice)
+
+        def _clip_progress(pct: int, _i=i, _base=clip_base_pct):
+            if progress_cb:
+                overall = int(_base + (pct / 100.0) * cut_slice)
+                progress_cb(f"cutting clip {_i+1}/{total_clips} ({pct}%)", overall)
+
+        # Initial signal so UI doesn't flatline waiting for the first ffmpeg event
         if progress_cb:
-            progress_cb(f"cutting clip {i+1}/{total_clips}", 50 + int((i / total_clips) * 50))
-            
+            progress_cb(f"cutting clip {i+1}/{total_clips} (0%)", int(clip_base_pct))
+
         cut_clip(
             source_video=full_video_path,
             start=clip["start"],
             end=clip["end"],
-            output_path=out_path
+            output_path=out_path,
+            progress_cb=_clip_progress,
         )
 
         filename = out_path.name
@@ -1588,7 +1679,8 @@ def download_and_cut_clips(
         })
 
         if progress_cb:
-            progress_cb(f"cutting clip {i+1}/{total_clips}", 50 + int(((i + 1) / total_clips) * 50))
+            progress_cb(f"cutting clip {i+1}/{total_clips} done",
+                        int(50 + ((i + 1) * cut_slice)))
 
     # Clean up the full source video to save disk space
     try:

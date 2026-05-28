@@ -118,6 +118,9 @@ export default {
 
     // â”€â”€ computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const selectedClips = computed(() => proposedClips.value.filter(c => c.selected));
+    const selectedTotalDuration = computed(() =>
+      selectedClips.value.reduce((sum, c) => sum + (Number(c.duration) || 0), 0)
+    );
     const effectiveKey = computed(() => {
       const override = geminiKeyOverride.value.trim();
       if (override) return override;
@@ -339,7 +342,7 @@ export default {
       analyzeStatus, analyzeMessage, analyzeStage, analyzeElapsed, stageLabel, fmtElapsed,
       videoTitle, videoId, videoDuration, proposedClips, previewClipId,
       cutStatus, cutMessage, cutProgress, doneClips,
-      selectedClips, canAnalyze, canCut,
+      selectedClips, selectedTotalDuration, canAnalyze, canCut,
       startAnalyze, startCut,
       toggleAll, fmtSeconds, fmtDuration,
       goHome, goSubtitleClip, clipUrl, ytEmbedUrl, togglePreview, reset,
@@ -548,7 +551,12 @@ export default {
       </div>
 
       <div class="ytc-cut-bar">
-        <span class="ytc-selected-count">{{ selectedClips.length }} / {{ proposedClips.length }} selected</span>
+        <div class="ytc-cut-info">
+          <span class="ytc-selected-count">{{ selectedClips.length }} / {{ proposedClips.length }} selected</span>
+          <span v-if="selectedClips.length" class="ytc-selected-total">
+            &middot; total {{ fmtDuration(selectedTotalDuration) }}
+          </span>
+        </div>
         <button
           class="btn btn-accent ytc-cut-btn"
           :disabled="!canCut"

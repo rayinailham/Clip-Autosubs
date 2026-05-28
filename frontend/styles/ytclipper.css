@@ -361,7 +361,21 @@
   border-top: 1px solid var(--border);
 }
 
+.ytc-cut-info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .ytc-selected-count { font-size: 0.85rem; color: var(--text-dim); }
+
+.ytc-selected-total {
+  font-size: 0.85rem;
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
 .ytc-cut-btn { min-width: 220px; }
 
