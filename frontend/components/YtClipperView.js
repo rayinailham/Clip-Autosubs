@@ -1,4 +1,4 @@
-﻿import { ref, computed } from 'vue';
+﻿import { ref, computed, onMounted } from 'vue';
 import store from '../store.js';
 import {
   ytAnalyze, ytPollAnalyze,
@@ -23,10 +23,13 @@ function fmtDuration(secs) {
 export default {
   name: 'YtClipperView',
   setup() {
-    // â”€â”€ state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── state ────────────────────────────────────────────────
     const url = ref('');
     const criteria = ref('');
-    const geminiKey = ref('');
+    // Gemini key now lives in Settings — keep a local override field so the user
+    // can paste a one-off key without going to Settings.
+    const geminiKeyOverride = ref('');
+    const showKeyOverride = ref(false);
 
     const analyzeStatus = ref('idle'); // idle | running | done | error
     const analyzeMessage = ref('');
@@ -46,9 +49,18 @@ export default {
 
     // â”€â”€ computed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     const selectedClips = computed(() => proposedClips.value.filter(c => c.selected));
+    const effectiveKey = computed(() => {
+      const override = geminiKeyOverride.value.trim();
+      if (override) return override;
+      // Empty string here triggers the backend to use the saved key (if any).
+      return store.settings.gemini_api_key_set ? '' : '';
+    });
+    const hasKey = computed(() =>
+      geminiKeyOverride.value.trim() !== '' || store.settings.gemini_api_key_set
+    );
     const canAnalyze = computed(() =>
       url.value.trim() &&
-      geminiKey.value.trim() &&
+      hasKey.value &&
       analyzeStatus.value !== 'running'
     );
     const canCut = computed(() =>
@@ -68,7 +80,7 @@ export default {
       doneClips.value = [];
 
       try {
-        const res = await ytAnalyze(url.value.trim(), criteria.value.trim(), geminiKey.value.trim());
+        const res = await ytAnalyze(url.value.trim(), criteria.value.trim(), effectiveKey.value);
         analyzeJobId.value = res.job_id;
         _pollAnalyze();
       } catch (e) {
@@ -182,7 +194,9 @@ export default {
     }
 
     return {
-      url, criteria, geminiKey,
+      url, criteria,
+      geminiKeyOverride, showKeyOverride, hasKey,
+      store,
       analyzeStatus, analyzeMessage, videoTitle, videoDuration, proposedClips,
       cutStatus, cutMessage, cutProgress, doneClips,
       selectedClips, canAnalyze, canCut,
@@ -220,13 +234,27 @@ export default {
       <div class="ytc-field">
         <label class="ytc-label">
           Gemini API Key
-          <span class="ytc-hint-text">
-            &ndash; not stored anywhere, only used for this request &middot;
-            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Get a free key</a>
+          <span v-if="store.settings.gemini_api_key_set" class="ytc-hint-text">
+            &ndash; using saved key from
+            <a href="#" @click.prevent="store.appMode = 'settings'">Settings</a>
+            &middot; model <code>{{ store.settings.gemini_model }}</code>
+          </span>
+          <span v-else class="ytc-hint-text">
+            &ndash; no key saved. Add one in
+            <a href="#" @click.prevent="store.appMode = 'settings'">Settings</a>
+            or paste a one-off key below.
           </span>
         </label>
+        <button
+          v-if="store.settings.gemini_api_key_set && !showKeyOverride"
+          class="btn btn-ghost btn-xs"
+          type="button"
+          style="align-self:flex-start; margin-bottom:0.4rem;"
+          @click="showKeyOverride = true"
+        >Use a different key for this run</button>
         <input
-          v-model="geminiKey"
+          v-if="!store.settings.gemini_api_key_set || showKeyOverride"
+          v-model="geminiKeyOverride"
           type="password"
           class="ytc-input ytc-key-input"
           placeholder="AIza..."

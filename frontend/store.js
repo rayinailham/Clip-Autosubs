@@ -6,13 +6,34 @@ import { reactive } from 'vue';
 
 const store = reactive({
   // ── App Mode ─────────────────────────────
-  appMode: 'home', // 'home' | 'subtitle' | 'vtuber' | 'ytclipper'
+  appMode: 'home', // 'home' | 'subtitle' | 'vtuber' | 'ytclipper' | 'settings'
 
   // ── Navigation ──────────────────────────
   currentView: 'upload', // 'upload' | 'editor'
 
+  // ── Settings (loaded from backend on boot) ─────────
+  settings: {
+    elevenlabs_api_key: '',           // set on save; redacted on load
+    elevenlabs_api_key_set: false,    // backend says key exists
+    elevenlabs_model: 'scribe_v1',
+    elevenlabs_models: ['scribe_v1'],
+
+    gemini_api_key: '',
+    gemini_api_key_set: false,
+    gemini_model: 'gemini-2.0-flash',
+    gemini_models: [
+      'gemini-2.0-flash',
+      'gemini-2.5-flash',
+      'gemini-2.5-pro',
+      'gemini-3-flash-preview',
+    ],
+
+    loaded: false,
+  },
+
   // ── Transcription data ──────────────────
-  transcriptionModel: 'large-v2', // 'large-v2' (whisperx) or 'flyfront/anime-whisper-faster' (anime) or 'scribe_v2' (elevenlabs)
+  // Active transcription model id (mirrors settings.elevenlabs_model).
+  transcriptionModel: 'scribe_v1',
   elevenlabsApiKey: '',
   words: [],
   videoFilename: '',

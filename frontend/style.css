@@ -10,6 +10,7 @@
 @import './styles/reframe.css';
 @import './styles/ytclipper.css';
 @import './styles/refine.css';
+@import './styles/settings.css';
 
 /* ═══════════════════════════════════════════════
    LEGACY — kept purely as fallback during migration.

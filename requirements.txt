@@ -1,11 +1,8 @@
 # =============================================
-# Clipping Project - Phase 1: Transcription
+# Clipping Project — ElevenLabs Scribe edition
 # =============================================
-# Python 3.11 | CUDA 12.8 | RTX 3060 6GB VRAM
+# No local ML deps. All transcription via ElevenLabs API.
 # =============================================
-
-# --- Core ML ---
-whisperx
 
 # --- Web Server ---
 fastapi[standard]
@@ -19,3 +16,4 @@ requests
 # --- YouTube Clip Finder ---
 yt-dlp
 google-genai
+youtube-transcript-api
