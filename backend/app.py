@@ -1503,8 +1503,25 @@ def _do_refine(job_id: str, req: RefineRequest):
 @app.post("/refine")
 async def start_refine(req: RefineRequest, background_tasks: BackgroundTasks):
     """Start a background refine job. Returns job_id for polling."""
-    if not req.gemini_api_key.strip():
-        raise HTTPException(status_code=400, detail="Gemini API key is required.")
+    # Fallback chain: request → settings.gemini_api_key. Mirrors /yt-clip/analyze
+    # so users with a key configured in Settings don't have to paste it again.
+    s = load_settings()
+    gem_key = (req.gemini_api_key or "").strip() or (s.get("gemini_api_key") or "").strip()
+    if not gem_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Gemini API key is required. Configure one in Settings or paste it on this page.",
+        )
+    req.gemini_api_key = gem_key
+    # ElevenLabs key is only needed for scribe_v2; use the same fallback.
+    if req.transcription_model == "scribe_v2":
+        el_key = (req.elevenlabs_api_key or "").strip() or (s.get("elevenlabs_api_key") or "").strip()
+        if not el_key:
+            raise HTTPException(
+                status_code=400,
+                detail="ElevenLabs API key is required for Scribe v2. Configure one in Settings.",
+            )
+        req.elevenlabs_api_key = el_key
     video_path = UPLOAD_DIR / req.video_filename
     if not video_path.exists():
         video_path = RENDERED_DIR / req.video_filename

@@ -1,4 +1,4 @@
-import { ref, computed, onBeforeUnmount } from 'vue';
+import { ref, computed, onBeforeUnmount, watch } from 'vue';
 import store, { regenerateAutoGroups } from '../store.js';
 import { fetchUploads, uploadAndTranscribe, startRefineJob, pollRefineStatus, videoURL, deleteUpload } from '../api.js';
 
@@ -21,6 +21,18 @@ export default {
     const doGrouping = ref(true);
     const doDiarize = ref(false);
     const numSpeakers = ref(null);
+
+    // ── API key resolution ─────────────────────────────────
+    // Prefer the Gemini key configured in Settings. Only require manual entry
+    // when the backend has no stored key. Same logic mirrors YtClipperView.
+    const geminiKeyConfigured = computed(() => !!store.settings.gemini_api_key_set);
+    const elevenlabsKeyConfigured = computed(() => !!store.settings.elevenlabs_api_key_set);
+    const showKeyInput = ref(false);
+
+    // Auto-disable diarization when the model can't do it (only scribe_v2 supports diarize).
+    watch(() => store.transcriptionModel, (m) => {
+      if (m !== 'scribe_v2') doDiarize.value = false;
+    });
 
     const processedUploads = computed(() => {
       let list = [...uploads.value];
@@ -106,7 +118,11 @@ export default {
     }
 
     function canStart() {
-      return apiKey.value.trim() && (selectedFile.value || uploadFile.value);
+      const hasKey = geminiKeyConfigured.value || apiKey.value.trim();
+      const hasElKey = store.transcriptionModel !== 'scribe_v2'
+        || elevenlabsKeyConfigured.value
+        || (store.elevenlabsApiKey || '').trim();
+      return !!hasKey && !!hasElKey && (selectedFile.value || uploadFile.value);
     }
 
     async function startRefine() {
@@ -115,7 +131,8 @@ export default {
       error.value = '';
       step.value = 'processing';
       progress.value = { step: 'init', message: 'Preparing…' };
-      store.refine.geminiApiKey = apiKey.value.trim();
+      // Cache pasted key only — backend resolves the configured one itself.
+      if (apiKey.value.trim()) store.refine.geminiApiKey = apiKey.value.trim();
 
       let filename = selectedFile.value;
 
@@ -270,7 +287,8 @@ export default {
       STEP_ORDER, STEP_LABELS, dragover, videoURL, loadUploads,
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads, collapsedFolders, toggleFolder,
-      doGrouping, deleteFile,
+      doGrouping, doDiarize, numSpeakers, deleteFile,
+      geminiKeyConfigured, elevenlabsKeyConfigured, showKeyInput,
     };
   },
   template: `
@@ -321,7 +339,8 @@ export default {
           <div v-if="store.transcriptionModel === 'scribe_v2'" style="background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm); margin-top: 0.8rem;">
             <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
               <span>🔑 ElevenLabs API Key</span>
-              <input type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
+              <span v-if="elevenlabsKeyConfigured" style="font-size:0.72rem; color: var(--success); font-weight:600;">✓ Using key from Settings</span>
+              <input v-else type="password" v-model="store.elevenlabsApiKey" placeholder="sk_..." style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); width: 60%;" />
             </label>
           </div>
         </div>
@@ -331,10 +350,14 @@ export default {
           <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 1rem;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
               <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-dim);">🔑 Gemini API Key</span>
-              <a href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent); font-size: 0.72rem; text-decoration: underline; text-underline-offset: 2px;">Get one free</a>
+              <span v-if="geminiKeyConfigured && !showKeyInput" style="display:flex; align-items:center; gap:0.5rem;">
+                <span style="font-size:0.72rem; color: var(--success); font-weight:600;">✓ Using key from Settings</span>
+                <button class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:2px 8px;" @click="showKeyInput = true">Override</button>
+              </span>
+              <a v-else href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent); font-size: 0.72rem; text-decoration: underline; text-underline-offset: 2px;">Get one free</a>
             </div>
-            <input type="password" v-model="apiKey"
-                   placeholder="Paste your Google Gemini API key…"
+            <input v-if="!geminiKeyConfigured || showKeyInput" type="password" v-model="apiKey"
+                   :placeholder="geminiKeyConfigured ? 'Override stored key (optional)…' : 'Paste your Google Gemini API key…'"
                    style="width: 100%; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 0.8rem; outline: none; font-family: monospace;" />
           </div>
         </div>
