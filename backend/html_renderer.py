@@ -140,15 +140,19 @@ def generate_subtitle_html(words, groups, style, width, height):
 
     let lastGroupKey = null;
 
+    window.ANIM_MS = Math.max(s.anim_speed || 200, s.static_anim_speed || 300);
+
     window.seekTo = function(t) {{
       let activeGroup = null;
       for (const g of groupsList) {{
         if (t >= g.start && t <= g.end + 0.15) {{ activeGroup = g; break; }}
       }}
       if (!activeGroup) {{
+        if (lastGroupKey === null && animWrapper.innerHTML === '') return false;
         animWrapper.innerHTML = '';
         lastGroupKey = null;
-        return;
+        animWrapper.dataset.last = '';
+        return "frame";
       }}
       
       let activeIdx = -1;
@@ -166,6 +170,7 @@ def generate_subtitle_html(words, groups, style, width, height):
       const isNewGroup = groupKey !== lastGroupKey;
       
       if (!isDynamic) {{
+        if (!isNewGroup) return false;
         if (isNewGroup) {{
           lastGroupKey = groupKey;
           const words = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
@@ -185,8 +190,9 @@ def generate_subtitle_html(words, groups, style, width, height):
             html = `<span class="subtitle-word ${{animClass}}" style="${{baseStyle}}; padding-bottom:10px; --anim-speed:${{animSpeedMs}}ms">${{sentence}}</span>`;
           }}
           animWrapper.innerHTML = html;
+          return "frame";
         }}
-        return;
+        return false;
       }}
 
       // Dynamic Mode Loop
@@ -220,9 +226,11 @@ def generate_subtitle_html(words, groups, style, width, height):
       }}).join(' ');
       
       // Update DOM
-      if (animWrapper.dataset.last === activeGroup.start + "_" + activeIdx) return;
+      const stateKey = activeGroup.start + "_" + activeIdx;
+      if (animWrapper.dataset.last === stateKey && !isNewGroup) return false;
       animWrapper.innerHTML = html;
-      animWrapper.dataset.last = activeGroup.start + "_" + activeIdx;
+      animWrapper.dataset.last = stateKey;
+      return isNewGroup ? "frame" : true;
     }};
     
     // Disable CSS animations infinite looping or pausing issues if any. Wait for fonts.
@@ -237,12 +245,17 @@ def generate_subtitle_html(words, groups, style, width, height):
 async def render_html_sequence_to_video(html_content: str, video_path: str, output_path: str, duration: float, width: int, height: int, fps: int = 60, crf: int = 18, progress_callback=None):
     from playwright.async_api import async_playwright
     import tempfile
-    
+
+    # Capture at half the output rate; ffmpeg duplicates frames to reach output fps.
+    # Subtitles are static between word changes, so 30fps capture is visually identical to 60fps.
+    capture_fps = max(15, fps // 2)
+
     fd, temp_html_path = tempfile.mkstemp(suffix=".html", text=True)
     with os.fdopen(fd, 'w', encoding='utf-8') as f:
         f.write(html_content)
         
     print(f"[html_renderer] HTML saved to {temp_html_path}")
+    print(f"[html_renderer] capture_fps={capture_fps} output_fps={fps}")
     
     # We use FFmpeg to read images from stdin. We output 32-bit (rgba) to overlay seamlessly
     ffmpeg_cmd = [
@@ -250,7 +263,7 @@ async def render_html_sequence_to_video(html_content: str, video_path: str, outp
         "-i", str(video_path),
         "-f", "image2pipe",
         "-vcodec", "png",
-        "-r", str(fps),
+        "-r", str(capture_fps),
         "-i", "-", # stdin
         # Use shortest=1 to guarantee FFmpeg terminates when input ends
         "-filter_complex", "[0:v][1:v]overlay=0:0:shortest=1[out]",
@@ -287,21 +300,39 @@ async def render_html_sequence_to_video(html_content: str, video_path: str, outp
             # Optionally wait a tiny bit for the page to settle
             await page.evaluate("document.body.style.background = 'transparent'; document.documentElement.style.background = 'transparent';")
             
-            total_frames = int(duration * fps)
+            anim_ms = await page.evaluate("window.ANIM_MS || 200")
+            anim_window_s = (anim_ms + 50) / 1000.0  # small safety margin
+
+            total_frames = int(duration * capture_fps)
+            last_screenshot = None
+            reused = 0
+            force_until = -1.0
             for f in range(total_frames):
-                t = f / fps
-                await page.evaluate(f"window.seekTo({t})")
-                
-                screenshot = await page.screenshot(type="png", omit_background=True)
+                t = f / capture_fps
+                changed = await page.evaluate(f"window.seekTo({t})")
+
+                # "frame" return = group/sentence transition started → force-capture during anim window
+                if changed == "frame":
+                    force_until = t + anim_window_s
+
+                must_capture = bool(changed) or last_screenshot is None or t < force_until
+
+                if must_capture:
+                    screenshot = await page.screenshot(type="png", omit_background=True)
+                    last_screenshot = screenshot
+                else:
+                    screenshot = last_screenshot
+                    reused += 1
+
                 process.stdin.write(screenshot)
-                
+
                 pct = (f / total_frames) * 100
                 if progress_callback and f % 5 == 0:
                     progress_callback(pct)
-                if f % 300 == 0:
-                    print(f"[html_renderer] Rendered {f}/{total_frames} frames ({pct:.1f}%)...")
-            
-            print(f"[html_renderer] Finished sending all {total_frames} frames to FFmpeg. (100.0%)")
+                if f % 150 == 0:
+                    print(f"[html_renderer] Rendered {f}/{total_frames} frames ({pct:.1f}%)... reused={reused}")
+
+            print(f"[html_renderer] Finished sending all {total_frames} frames to FFmpeg. (100.0%) reused={reused}/{total_frames} ({reused*100/max(1,total_frames):.1f}%)")
             
             if progress_callback:
                 progress_callback(100.0)
