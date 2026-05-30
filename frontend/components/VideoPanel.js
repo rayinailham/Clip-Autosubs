@@ -8,7 +8,6 @@ export default {
     const videoEl = ref(null);
     let timeUpdateHandler = null;
     let lastGroupKey = null;  // track group changes for entrance animations
-    let groupEntryTime = 0;   // timestamp of last group change
 
     function onTimeUpdate() {
       if (!videoEl.value) return;
@@ -40,11 +39,9 @@ export default {
       const upper = s.uppercase;
       const italic = s.italic;
       const bold = s.bold;
-      const highlightColor = s.highlight;
       const textColor = s.textColor;
       const fontSizeASS = s.fontSize || 80;
       const fontFamily = s.fontFamily;
-      const scale = s.scale / 100;
       const glowStrength = s.glow || 0;
       const glowColor = s.glowColor;
       const outlineColor = s.outlineColor;
@@ -117,10 +114,10 @@ export default {
 
       const textShadow = textShadowParts.join(', ');
 
-      // Find active group
+      // Find active group (linger already baked into g.end by getActiveGroups)
       let activeGroup = null;
       for (const g of groups) {
-        if (t >= g.start && t <= g.end + 0.15) { activeGroup = g; break; }
+        if (t >= g.start && t <= g.end) { activeGroup = g; break; }
       }
 
       const preview = document.getElementById('subtitle-preview');
@@ -154,17 +151,6 @@ export default {
         lastGroupKey = null;
         document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
         return;
-      }
-
-      // Active word
-      let activeIdx = -1;
-      for (let i = 0; i < activeGroup.words.length; i++) {
-        if (t >= activeGroup.words[i].start && t <= activeGroup.words[i].end) { activeIdx = i; break; }
-      }
-      if (activeIdx === -1) {
-        for (let i = activeGroup.words.length - 1; i >= 0; i--) {
-          if (t >= activeGroup.words[i].start) { activeIdx = i; break; }
-        }
       }
 
       preview.style.fontSize = scaledFontSize;
@@ -264,17 +250,8 @@ export default {
         if (avatarEl) avatarEl.remove();
       }
 
-      // ── All animation class names so we can clean them off the container ──
-      const ALL_ANIM_CLASSES = [
-        'subtitle-anim-fade-in','subtitle-anim-slide-up','subtitle-anim-slide-down',
-        'subtitle-anim-slide-left','subtitle-anim-slide-right','subtitle-anim-pop-in',
-        'subtitle-anim-bounce','subtitle-anim-blur-in','subtitle-anim-stretch',
-        'subtitle-anim-zoom-drop','subtitle-anim-flip-in',
-      ];
-
       // ── Ensure animation wrapper inside posWrapper ─────────
-      // Created here (instead of inside dynamic-mode branch) so static-mode
-      // innerHTML writes don't wipe the speaker avatar element above.
+      // Created here so caption innerHTML writes don't wipe the speaker avatar above.
       let animWrapper = posWrapper.querySelector('#subtitle-anim-wrapper');
       if (!animWrapper) {
         animWrapper = document.createElement('div');
@@ -291,91 +268,38 @@ export default {
         animWrapper.style.flex = '';
       }
 
-      // Static mode
-      if (!store.useDynamicMode) {
-        const groupKey = activeGroup.start + '_' + activeGroup.end;
-        if (groupKey !== lastGroupKey) {
-          lastGroupKey = groupKey;
-          const words = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
-          const sentence = words.join(' ');
-          const animName = store.style.sentenceAnimation || 'none';
-          const animSpeedMs = store.style.staticAnimSpeed || 300;
-          const animSpeed = animSpeedMs + 'ms';
-          const animIntensity = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
-          const baseColor = spkOn ? (spkCfg.text_color || '#111111') : textColor;
-          const baseStyle = `color:${baseColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${spkOn ? 'none' : textShadow}; --anim-intensity:${animIntensity}`;
+      // Static line render: whole caption shown at once (no per-word highlight).
+      const groupKey = activeGroup.start + '_' + activeGroup.end;
+      if (groupKey !== lastGroupKey) {
+        lastGroupKey = groupKey;
+        const tr = (activeGroup.translation || '').trim();
+        const words = tr
+          ? (upper ? tr.toUpperCase() : tr).split(/\s+/)
+          : activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
+        const sentence = words.join(' ');
+        const animName = store.style.sentenceAnimation || 'none';
+        const animSpeedMs = store.style.staticAnimSpeed || 300;
+        const animSpeed = animSpeedMs + 'ms';
+        const animIntensity = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
+        const baseColor = spkOn ? (spkCfg.text_color || '#111111') : textColor;
+        const baseStyle = `color:${baseColor}; font-style:${fontStyle}; font-weight:${fontWeight}; text-shadow:${spkOn ? 'none' : textShadow}; --anim-intensity:${animIntensity}`;
 
-          if (animName === 'typewriter') {
-            const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
-            animWrapper.innerHTML = words.map((word, i) =>
-              `<span class="subtitle-word subtitle-anim-fade-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
-            ).join(' ');
-          } else if (animName === 'cascade') {
-            const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
-            animWrapper.innerHTML = words.map((word, i) =>
-              `<span class="subtitle-word subtitle-anim-pop-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
-            ).join(' ');
-          } else {
-            const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
-            animWrapper.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
-          }
-        }
-        document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
-        return;
-      }
-
-      // Dynamic mode — track group changes for entrance animations
-      const dynamicGroupKey = activeGroup.start + '_' + activeGroup.end;
-      const isNewGroup = dynamicGroupKey !== lastGroupKey;
-
-      if (isNewGroup) {
-        lastGroupKey = dynamicGroupKey;
-        groupEntryTime = performance.now();
-        const rawAnim = store.style.groupAnimation || 'none';
-        const groupAnim = rawAnim === 'typewriter' ? 'slide-up'
-                        : rawAnim === 'cascade'    ? 'pop-in'
-                        : rawAnim;
-        ALL_ANIM_CLASSES.forEach(c => animWrapper.classList.remove(c));
-        void animWrapper.offsetWidth; // force reflow to restart animation
-        if (groupAnim !== 'none') {
-          animWrapper.style.setProperty('--anim-speed', (store.style.animSpeed || 200) + 'ms');
-          const ai = (store.style.animIntensity != null ? store.style.animIntensity : 100) / 100;
-          animWrapper.style.setProperty('--anim-intensity', ai.toString());
-          animWrapper.classList.add('subtitle-anim-' + groupAnim);
+        if (animName === 'typewriter') {
+          const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
+          animWrapper.innerHTML = words.map((word, i) =>
+            `<span class="subtitle-word subtitle-anim-fade-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
+          ).join(' ');
+        } else if (animName === 'cascade') {
+          const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
+          animWrapper.innerHTML = words.map((word, i) =>
+            `<span class="subtitle-word subtitle-anim-pop-in" style="${baseStyle}; --anim-speed:${perWord}ms; animation-delay:${i * perWord}ms">${word}</span>`
+          ).join(' ');
+        } else {
+          const animClass = animName !== 'none' ? ' subtitle-anim-' + animName : '';
+          animWrapper.innerHTML = `<span class="subtitle-word${animClass}" style="${baseStyle}; --anim-speed:${animSpeed}">${sentence}</span>`;
         }
       }
-
-      // Dynamic mode word spans
-      animWrapper.innerHTML = activeGroup.words.map((w, i) => {
-        const text = upper ? w.text.toUpperCase() : w.text;
-        const isActive = i === activeIdx;
-        const ws = w.style || {};
-        let color = isActive
-          ? (ws.highlight_color ? '#' + ws.highlight_color : highlightColor)
-          : (ws.normal_color ? '#' + ws.normal_color : textColor);
-        const scaleVal = isActive ? 'scale(' + scale + ')' : 'scale(1)';
-        const fs = ws.font_size ? 'font-size:' + Math.round(ws.font_size * displayedHeight / actualHeight) + 'px;' : '';
-        return '<span class="subtitle-word" style="color:' + color + '; transform:' + scaleVal + '; ' + fs + '; font-style:' + fontStyle + '; font-weight:' + fontWeight + '; text-shadow:' + textShadow + '">' + text + '</span>';
-      }).join(' ');
-
-      // Highlight playing word in transcript
       document.querySelectorAll('.word-chip.playing').forEach(el => el.classList.remove('playing'));
-      if (activeIdx >= 0) {
-        const globalIdx = store.words.indexOf(activeGroup.words[activeIdx]);
-        const chip = document.querySelector('.word-chip[data-index="' + globalIdx + '"]');
-        if (chip) {
-          chip.classList.add('playing');
-          const wordList = document.getElementById('word-list');
-          if (wordList) {
-            const chipTop = chip.offsetTop - wordList.offsetTop;
-            const chipBottom = chipTop + chip.offsetHeight;
-            const scrollTop = wordList.scrollTop;
-            const scrollBottom = scrollTop + wordList.clientHeight;
-            if (chipTop < scrollTop) wordList.scrollTop = chipTop;
-            else if (chipBottom > scrollBottom) wordList.scrollTop = chipBottom - wordList.clientHeight;
-          }
-        }
-      }
     }
 
     // Set video source whenever the editor opens
@@ -393,9 +317,6 @@ export default {
         videoEl.value.load();
       }
     });
-
-    // Reset group key so the first group re-animates after a mode switch
-    watch(() => store.useDynamicMode, () => { lastGroupKey = null; });
 
     onMounted(() => {
       if (videoEl.value) {

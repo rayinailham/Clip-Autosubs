@@ -1,12 +1,13 @@
 import { ref } from 'vue';
 import TranscriptPanel from './TranscriptPanel.js';
 import GroupsSidebar from './GroupsSidebar.js';
+import CaptionsPanel from './CaptionsPanel.js';
 import TrimPanel from './TrimPanel.js';
 import store, { regenerateAutoGroups } from '../store.js';
 
 export default {
   name: 'LeftSidebar',
-  components: { TranscriptPanel, GroupsSidebar, TrimPanel },
+  components: { TranscriptPanel, GroupsSidebar, CaptionsPanel, TrimPanel },
   emits: ['seek'],
   setup(_, { emit }) {
     const activeTab = ref('transcript');
@@ -17,7 +18,7 @@ export default {
 
     function switchTab(tab) {
       activeTab.value = tab;
-      if (tab === 'groups') {
+      if (tab === 'groups' || tab === 'captions') {
         if (store.words.length > 0 && store.customGroups.length === 0) {
           regenerateAutoGroups();
         }
@@ -36,6 +37,9 @@ export default {
         <button class="sidebar-tab" :class="{ active: activeTab === 'groups' }" @click="switchTab('groups')">
           📦 Groups
         </button>
+        <button class="sidebar-tab" :class="{ active: activeTab === 'captions' }" @click="switchTab('captions')">
+          🎬 Captions
+        </button>
         <button class="sidebar-tab" :class="{ active: activeTab === 'trim' }" @click="switchTab('trim')">
           ✂ Trim
         </button>
@@ -46,6 +50,9 @@ export default {
         </div>
         <div class="left-tab-pane groups-panel" v-show="activeTab === 'groups'">
           <GroupsSidebar />
+        </div>
+        <div class="left-tab-pane captions-pane" v-show="activeTab === 'captions'">
+          <CaptionsPanel @seek="handleSeek" />
         </div>
         <div class="left-tab-pane" v-show="activeTab === 'trim'">
           <TrimPanel @seek="handleSeek" />

@@ -26,6 +26,42 @@ from logger import get_logger
 log = get_logger("refine")
 
 
+# Hiragana, Katakana, CJK Unified (+ ext A), halfwidth Katakana, Hangul.
+# Used to decide whether a group still contains source-language (non-English)
+# text that MUST be translated before it can be shown on screen.
+_NON_ENGLISH_RE = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f\uac00-\ud7af]"
+)
+
+
+def _looks_non_english(text: str) -> bool:
+    """True if the text contains CJK / Japanese / Korean characters."""
+    return bool(_NON_ENGLISH_RE.search(text))
+
+
+# Focused prompt used ONLY by the post-pass guard to translate the handful of
+# groups that the main grouping call left without an English translation
+# (fallback groups, split pieces, merged groups, blank model output). Mirrors
+# the voice spec of the main prompt so the tone stays consistent.
+_TRANSLATE_FIXUP_SYSTEM_PROMPT = """\
+You are a subtitle translator. You will receive a numbered list of short phrases \
+taken from a video (often Japanese, sometimes other languages). Translate EACH \
+phrase into natural, fluent, spoken English.
+
+VOICE: casual American high-schooler / streamer talking to friends. Use natural \
+contractions (I'm, it's, gonna, kinda). Light tasteful slang only where it fits \
+(bro, dude, lowkey, ngl, no way, for real, wait what). NEVER use brainrot \
+(skibidi, rizz, gyatt, sigma, ohio). Keep it streamer-safe (no profanity stronger \
+than "damn"/"hell" unless the source clearly curses). NO textbook phrasing \
+("I am going to", "Indeed", "Truly"). Translate the MEANING of the whole phrase, \
+never word-by-word. Keep each translation tight (subtitle-length).
+
+Return ONLY valid JSON, no markdown:
+{"translations": [{"index": 0, "text": "English here"}, {"index": 1, "text": "..."}]}
+Every input index MUST appear exactly once with a non-empty English string.
+"""
+
+
 # ─── Gemini Analysis ────────────────────────────────────────
 
 _REFINE_SYSTEM_PROMPT = """\
@@ -44,6 +80,8 @@ Compare them. If SOURCE B exists, use its spelling and punctuation to correct SO
 Group the words into perfectly natural, readable subtitle chunks. You MUST strictly obey these rules:
 - MINIMUM 2 words per group. The ONLY exception is if a word has a >1.0s gap from its neighbors. DO NOT create random 1-word groups.
 - MAXIMUM 6-8 words per group so they fit well on a vertical screen.
+- LINE LENGTH: aim for ~15-32 characters of displayed text per group; treat ~42 characters as a hard ceiling. A line that would render longer than that MUST be split, even if it is under 8 words (long words count). Avoid very short stranded lines (<8 chars) unless forced by a pause or sentence end.
+- BALANCE: keep adjacent groups roughly even in length. Do not pair one 8-word line next to a 1-word line when they can be balanced.
 - NEVER split grammatical pairs (e.g., keep "going to", "to be", "I am" together).
 - NEW GROUP triggers: ALWAYS start a new group after sentence-ending punctuation (`.`, `?`, `!`) or strong pauses like commas.
 - Provide the explicit array of `word_indices` for each group. They must flow consecutively without repeating indices.
@@ -325,13 +363,13 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
     final_groups = []
     for g in validated:
         inds = g["word_indices"]
-        # If we never split this group, the original translation stays attached.
-        # If we DO split, we keep the translation only on the FIRST piece because
-        # the original Gemini translation covered the full original group span;
-        # downstream splits do not have a per-piece translation, so we leave them
-        # blank rather than duplicate text incorrectly.
+        # The original translation covered the WHOLE group span. If this group is
+        # split below, that English no longer matches any single piece, so we blank
+        # every piece and let the post-pass guard (_ensure_translations) translate
+        # each piece from its own source words. Only an UNSPLIT group keeps the
+        # original translation. This guarantees no source-language leak on splits.
         original_translation = g.get("translation", "")
-        is_first_piece = True
+        pieces: list[list[int]] = []
         current_chunk = []
         for idx in inds:
             # Check for large time gap before adding to current_chunk
@@ -339,11 +377,7 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
                 prev_idx = current_chunk[-1]
                 gap = words[idx]["start"] - words[prev_idx]["end"]
                 if gap >= 1.0:
-                    final_groups.append({
-                        "word_indices": current_chunk,
-                        "translation": original_translation if is_first_piece else "",
-                    })
-                    is_first_piece = False
+                    pieces.append(current_chunk)
                     current_chunk = []
 
             current_chunk.append(idx)
@@ -351,17 +385,22 @@ def _validate_groups(groups: list[dict], words: list[dict], excluded_indices: se
             # If the chunk ends in punctuation (or is excessively long as a fallback safety limit)
             has_punct = any(text.endswith(p) for p in [".", "?", "!", ","])
             if has_punct or len(current_chunk) >= 12:
-                final_groups.append({
-                    "word_indices": current_chunk,
-                    "translation": original_translation if is_first_piece else "",
-                })
-                is_first_piece = False
+                pieces.append(current_chunk)
                 current_chunk = []
         if current_chunk:
+            pieces.append(current_chunk)
+
+        if len(pieces) == 1:
             final_groups.append({
-                "word_indices": current_chunk,
-                "translation": original_translation if is_first_piece else "",
+                "word_indices": pieces[0],
+                "translation": original_translation,
             })
+        else:
+            for piece in pieces:
+                final_groups.append({
+                    "word_indices": piece,
+                    "translation": "",  # guard re-translates each piece
+                })
 
     # Cleanup pass: eliminate 1-word groups if there isn't a significant time gap
     merged_groups = []
@@ -440,6 +479,84 @@ def _fallback_groups(words: list[dict], excluded_indices: set, wpg: int = 4) -> 
     return groups
 
 
+def _ensure_translations(
+    groups: list[dict],
+    words: list[dict],
+    api_key: str,
+    model: str,
+    base_url: Optional[str],
+    progress_cb: Optional[Callable[[str, str], None]] = None,
+) -> list[dict]:
+    """
+    Guarantee EVERY group carries a non-empty English `translation` so no
+    source-language (Japanese/CJK) text can leak onto the screen.
+
+    Resolution order per group:
+      • already has a translation            → keep it
+      • source text is already English        → copy source verbatim
+      • source is non-English & untranslated  → collect for one batched LLM call
+      • LLM still returns nothing              → "..." placeholder (never source)
+
+    This closes the four leak paths: fallback groups, split-group pieces,
+    missing-index fills, and blank model output.
+    """
+    pending: list[tuple[dict, str]] = []
+    for g in groups:
+        tr = (g.get("translation") or "").strip()
+        gw = [words[i] for i in g.get("word_indices", []) if i < len(words)]
+        src = " ".join(w.get("text", "") for w in gw).strip()
+        if tr:
+            g["translation"] = tr
+            continue
+        if not src:
+            g["translation"] = ""
+            continue
+        if not _looks_non_english(src):
+            # Source is already English — show it as-is.
+            g["translation"] = src
+        else:
+            pending.append((g, src))
+
+    if not pending:
+        return groups
+
+    if progress_cb:
+        progress_cb("analyze", f"Translating {len(pending)} leftover group(s) to English…")
+
+    numbered = "\n".join(f"{i}|{src}" for i, (_, src) in enumerate(pending))
+    user_prompt = (
+        "Translate each phrase to natural spoken English.\n"
+        "Each line is: INDEX|PHRASE\n\n"
+        f"{numbered}"
+    )
+
+    out: dict[int, str] = {}
+    try:
+        resp = nine_router.generate_json(
+            system_prompt=_TRANSLATE_FIXUP_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            api_key=api_key,
+            model=model,
+            base_url=base_url,
+            temperature=0.2,
+            max_tokens=8000,
+            progress_cb=progress_cb,
+        )
+        for item in (resp.get("translations") or []):
+            idx = item.get("index")
+            txt = (item.get("text") or "").strip()
+            if isinstance(idx, int) and txt:
+                out[idx] = txt
+    except Exception as e:  # noqa: BLE001 — never let a translate failure leak source
+        log.warning("translation fixup call failed: %s", e)
+
+    for i, (g, _src) in enumerate(pending):
+        # Placeholder over source: showing "..." is acceptable, showing Japanese is not.
+        g["translation"] = out.get(i, "").strip() or "..."
+
+    return groups
+
+
 # ─── Main Refine Pipeline ───────────────────────────────────
 
 def refine_video(
@@ -452,6 +569,7 @@ def refine_video(
     req_filename: str = "",
     transcription_model: str = "large-v2",
     elevenlabs_api_key: Optional[str] = None,
+    language_code: Optional[str] = None,
     diarize: bool = False,
     num_speakers: Optional[int] = None,
     do_grouping: bool = True,
@@ -486,16 +604,15 @@ def refine_video(
     # ── Step 1: Transcribe ──────────────────────────────────
     if transcription_model == "scribe_v2":
         log_step("transcribe", "Transcribing video with ElevenLabs Scribe v2…")
-    elif transcription_model == "flyfront/anime-whisper-faster":
-        log_step("transcribe", "Transcribing video with Anime-Whisper…")
     else:
-        log_step("transcribe", "Transcribing video with WhisperX…")
+        log_step("transcribe", "Transcribing video with ElevenLabs Scribe v1…")
 
     transcription = transcribe_video(
         str(video_path), 
         output_dir,
         model_id=transcription_model,
         elevenlabs_api_key=elevenlabs_api_key,
+        language_code=language_code,
         diarize=diarize,
         num_speakers=num_speakers,
     )
@@ -604,6 +721,64 @@ def refine_video(
     else:
         groups = _fallback_groups(adjusted_words, excluded_indices)
         log_step("apply", f"Gemini groups invalid/skipped — using {len(groups)} auto-groups")
+
+    # 4d-bis — GUARANTEE every group has English BEFORE token replacement.
+    # Closes all source-language leak paths (fallback groups, split pieces,
+    # missing-index fills, blank model output). Must run while adjusted_words
+    # still holds the original source text used to translate.
+    if do_grouping:
+        groups = _ensure_translations(
+            groups, adjusted_words, ai_api_key,
+            model=(ai_model or nine_router.DEFAULT_MODEL),
+            base_url=ai_base_url, progress_cb=progress_cb,
+        )
+
+    # 4e — Translate-only mode: REPLACE the source-language words with their
+    # English translation tokens so the transcript, preview, and burned video
+    # all show English (no source language anywhere). Per-group translation
+    # has no per-word timing, so we distribute the group's time span evenly
+    # across the translated tokens. Groups with no translation fall back to
+    # their original source tokens.
+    translated_words = []
+    for g in groups:
+        indices = g["word_indices"]
+        gw = [adjusted_words[i] for i in indices if i < len(adjusted_words)]
+        if not gw:
+            continue
+        g_start = float(gw[0]["start"])
+        g_end = float(gw[-1]["end"])
+        spk = g.get("speaker") or gw[0].get("speaker", "SPEAKER_00")
+        tr = (g.get("translation") or "").strip()
+        tokens = tr.split() if tr else [w.get("text", "") for w in gw]
+        tokens = [t for t in tokens if t]
+        if not tokens:
+            continue
+        span = max(g_end - g_start, 0.001)
+        # Distribute the group span across tokens PROPORTIONALLY to token length
+        # (longer words take longer to read/say) instead of a naive even split.
+        # JP→EN word counts differ wildly, so even-split desynced highlight timing.
+        weights = [max(len(t), 1) for t in tokens]
+        total_w = sum(weights)
+        start_idx = len(translated_words)
+        cursor = g_start
+        for j, tok in enumerate(tokens):
+            ws = cursor
+            if j == len(tokens) - 1:
+                we = g_end
+            else:
+                we = ws + span * (weights[j] / total_w)
+            cursor = we
+            translated_words.append({
+                "text": tok,
+                "start": round(ws, 3),
+                "end": round(we, 3),
+                "speaker": spk,
+            })
+        g["word_indices"] = list(range(start_idx, start_idx + len(tokens)))
+
+    if translated_words:
+        adjusted_words = translated_words
+        log_step("apply", f"Replaced source words with {len(adjusted_words)} English tokens")
 
     # Attach timing to groups
     for g in groups:

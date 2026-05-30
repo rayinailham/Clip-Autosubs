@@ -1428,6 +1428,171 @@ header h1 {
   background: var(--accent-dim);
 }
 
+/* ── Captions Panel (Premiere-style line editor) ── */
+.captions-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.cap-rules {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cap-rule-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cap-rule-row label {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cap-rule-row input[type="number"] {
+  width: 52px;
+  flex-shrink: 0;
+  padding: 3px 4px;
+  font-size: 0.65rem;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  text-align: center;
+}
+
+.cap-rule-row input[type="number"]:focus { border-color: var(--accent); outline: none; }
+
+.cap-reset {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.cap-count {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.cap-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.4rem 0.5rem 1rem;
+}
+
+.cap-row {
+  display: grid;
+  grid-template-columns: 22px 84px 1fr;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+
+.cap-row:hover { background: rgba(255,255,255,0.02); }
+
+.cap-num {
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  text-align: right;
+  padding-top: 4px;
+}
+
+.cap-tc {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6rem;
+  color: var(--text-dim);
+  cursor: pointer;
+  line-height: 1.5;
+  padding-top: 2px;
+}
+
+.cap-tc:hover .cap-tc-in { color: var(--accent); }
+.cap-tc-out { opacity: 0.6; }
+
+.cap-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.cap-text {
+  width: 100%;
+  resize: vertical;
+  padding: 5px 7px;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-family: inherit;
+}
+
+.cap-text:focus { border-color: var(--accent); outline: none; }
+
+.cap-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.58rem;
+}
+
+.cap-len { color: var(--text-dim); }
+.cap-len-ok { color: var(--text-dim); }
+.cap-len-warn { color: var(--warning); }
+.cap-len-over { color: #ff5c5c; font-weight: 600; }
+.cap-len-short { color: #6b8cff; }
+
+.cap-edited {
+  color: var(--accent);
+  font-style: italic;
+}
+
+.cap-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 3px;
+}
+
+.cap-act {
+  width: 20px;
+  height: 18px;
+  font-size: 0.72rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  background: var(--surface3);
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cap-act:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-dim);
+}
+
+.cap-act:disabled { opacity: 0.3; cursor: default; }
+
 /* ── Sidebar Footer ──────────────────────────── */
 .sidebar-footer {
   padding: 0.75rem 1rem;

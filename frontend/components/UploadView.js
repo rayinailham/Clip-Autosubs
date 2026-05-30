@@ -93,7 +93,6 @@ export default {
       if (result && result.groups && result.groups.length > 0) {
         store.customGroups = result.groups;
         store.useCustomGroups = true;
-        store.useDynamicMode = false;
       } else {
         regenerateAutoGroups();
       }
@@ -242,8 +241,7 @@ export default {
           <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
             <span>🧠 Transcription Model</span>
             <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
-              <option value="large-v2">WhisperX (English / Auto-Translate)</option>
-              <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+              <option value="scribe_v1">ElevenLabs Scribe v1</option>
               <option value="scribe_v2">ElevenLabs Scribe v2 (High Accuracy)</option>
             </select>
           </label>

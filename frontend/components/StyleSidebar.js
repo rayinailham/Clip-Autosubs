@@ -34,39 +34,6 @@ export default {
       if (!store.useCustomGroups) regenerateAutoGroups();
     }
 
-    // Per-word style
-    const wordHighlight = ref('#FFD700');
-    const wordNormal = ref('#FFFFFF');
-    const wordFontSize = ref('');
-    const wordOutline = ref('#000000');
-
-    const selectedWordsInfo = computed(() => {
-      if (store.selectedWordIndices.size === 0) return '';
-      const texts = [...store.selectedWordIndices].slice(0, 5).map(i => store.words[i]?.text || '').join(', ');
-      const more = store.selectedWordIndices.size > 5 ? ' +' + (store.selectedWordIndices.size - 5) + ' more' : '';
-      return 'Selected: ' + texts + more;
-    });
-
-    function applyWordStyle() {
-      const hc = wordHighlight.value.replace('#', '');
-      const nc = wordNormal.value.replace('#', '');
-      const fs = wordFontSize.value ? parseInt(wordFontSize.value) : null;
-      const oc = wordOutline.value.replace('#', '');
-      saveUndoSnapshot('Apply per-word style');
-      store.selectedWordIndices.forEach(idx => {
-        if (!store.words[idx].style) store.words[idx].style = {};
-        store.words[idx].style.highlight_color = hc;
-        store.words[idx].style.normal_color = nc;
-        if (fs) store.words[idx].style.font_size = fs;
-        store.words[idx].style.outline_color = oc;
-      });
-    }
-
-    function clearWordStyles() {
-      saveUndoSnapshot('Clear word styles');
-      store.selectedWordIndices.forEach(idx => { delete store.words[idx].style; });
-    }
-
     function onPositionPreset() {
       const presets = { bottom: 85, center: 50, top: 15 };
       store.style.posY = presets[store.style.position] || 85;
@@ -77,8 +44,6 @@ export default {
       store, currentStaticPreset,
       staticPresetList,
       applyStaticPreset,
-      wordHighlight, wordNormal, wordFontSize, wordOutline,
-      selectedWordsInfo, applyWordStyle, clearWordStyles,
       regenerateAutoGroups, onPositionPreset,
     };
   },
@@ -245,34 +210,6 @@ export default {
         <label>Y</label>
         <input type="range" min="0" max="100" v-model.number="store.style.posY" />
         <input type="number" class="range-val-input" v-model.number="store.style.posY" min="0" max="100" />
-      </div>
-    </div>
-
-    <!-- Per-Word Style Panel -->
-    <div v-if="store.selectedWordIndices.size > 0" class="word-style-panel">
-      <div class="word-style-header">
-        <h4>Word Style Override</h4>
-        <button class="btn btn-outline btn-sm" @click="clearWordStyles">Clear</button>
-      </div>
-      <div class="selected-words-info">{{ selectedWordsInfo }}</div>
-      <div class="style-row">
-        <label>Highlight</label>
-        <input type="color" v-model="wordHighlight" />
-      </div>
-      <div class="style-row">
-        <label>Normal</label>
-        <input type="color" v-model="wordNormal" />
-      </div>
-      <div class="style-row">
-        <label>Font Size</label>
-        <input type="number" v-model="wordFontSize" placeholder="–" />
-      </div>
-      <div class="style-row">
-        <label>Outline</label>
-        <input type="color" v-model="wordOutline" />
-      </div>
-      <div class="style-row">
-        <button class="btn btn-primary btn-sm" @click="applyWordStyle" style="width:100%">Apply to Selected</button>
       </div>
     </div>
   `,

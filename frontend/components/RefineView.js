@@ -57,9 +57,8 @@ export default {
 
     const STEP_ORDER = ['init', 'transcribe', 'analyze', 'apply', 'done'];
     const STEP_LABELS = computed(() => {
-      let modelName = 'WhisperX';
+      let modelName = 'ElevenLabs Scribe v1';
       if (store.transcriptionModel === 'scribe_v2') modelName = 'ElevenLabs Scribe v2';
-      else if (store.transcriptionModel === 'flyfront/anime-whisper-faster') modelName = 'Anime-Whisper';
       return {
         init: 'Initializing…',
         transcribe: 'Transcribing with ' + modelName,
@@ -166,6 +165,7 @@ export default {
           ai_api_key: apiKey.value.trim(),
           transcription_model: store.transcriptionModel,
           elevenlabs_api_key: store.transcriptionModel === 'scribe_v2' ? store.elevenlabsApiKey.trim() : null,
+          language_code: store.sourceLanguage || null,
           diarize: doDiarize.value,
           num_speakers: doDiarize.value && numSpeakers.value > 0 ? parseInt(numSpeakers.value, 10) : null,
           do_grouping: doGrouping.value
@@ -218,6 +218,7 @@ export default {
           word_indices: g.word_indices,
           start: g.start,
           end: g.end,
+          translation: g.translation || '',
           speaker: g.speaker || (store.words[g.word_indices[0]] || {}).speaker || null,
         }));
         store.useCustomGroups = true;
@@ -226,7 +227,6 @@ export default {
       }
 
       // Apply static subtitle preset
-      store.useDynamicMode = false;
       store.style.animation = 'color-only';
       store.style.groupAnimation = 'pop-in';
 
@@ -329,9 +329,24 @@ export default {
             <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
               <span>🧠 Transcription Model</span>
               <select v-model="store.transcriptionModel" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
-                <option value="large-v2">WhisperX (English / Auto-Translate)</option>
-                <option value="flyfront/anime-whisper-faster">Anime-Whisper (Japanese-focused translation)</option>
+                <option value="scribe_v1">ElevenLabs Scribe v1</option>
                 <option value="scribe_v2">ElevenLabs Scribe v2 (High Accuracy)</option>
+              </select>
+            </label>
+          </div>
+
+          <div style="margin-bottom: 0.8rem; background: var(--surface); padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: var(--radius-sm);">
+            <label style="font-size: 0.8rem; color: var(--text); display: flex; align-items: center; justify-content: space-between;">
+              <span>🌐 Spoken Language</span>
+              <select v-model="store.sourceLanguage" style="padding: 4px 8px; border-radius: 4px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; max-width: 60%;">
+                <option value="">Auto-detect</option>
+                <option value="ja">Japanese</option>
+                <option value="en">English</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
               </select>
             </label>
           </div>

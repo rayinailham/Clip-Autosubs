@@ -35,7 +35,7 @@ from reframe_renderer import (
     render_shorts_blur_bg,
     render_shorts_black_bg,
 )
-from subtitle_generator import generate_ass, save_ass, generate_srt
+from subtitle_generator import generate_srt
 from transcribe import transcribe_video
 from yt_clipper import extract_transcript, analyze_with_ai, download_and_cut_clips
 import yt_cache
@@ -131,24 +131,11 @@ refine_jobs: dict = {}
 
 # ─── Pydantic Models ────────────────────────────────────────
 
-class WordStyle(BaseModel):
-    """Per-word style overrides. Any None values use the global style."""
-    highlight_color: Optional[str] = None
-    normal_color: Optional[str] = None
-    font_size: Optional[int] = None
-    font_name: Optional[str] = None
-    bold: Optional[bool] = None
-    italic: Optional[bool] = None
-    scale_highlight: Optional[int] = None
-    outline_color: Optional[str] = None
-    outline_width: Optional[int] = None
-
 
 class WordItem(BaseModel):
     text: str
     start: float
     end: float
-    style: Optional[WordStyle] = None  # Per-word style override
 
 
 class WordGroup(BaseModel):
@@ -156,13 +143,20 @@ class WordGroup(BaseModel):
     word_indices: list[int]  # Indices into the words array
     start: float  # Group display start time
     end: float    # Group display end time
+    translation: Optional[str] = None  # English translation (shown instead of source words when set)
+    speaker: Optional[str] = None
 
 
 class StyleConfig(BaseModel):
     # Grouping
     words_per_group: int = 4
     use_custom_groups: bool = False  # If True, use word_groups instead of auto-grouping
-    dynamic_mode: bool = True  # True = per-word highlighting, False = static sentence
+    max_chars_per_group: int = 0   # 0 = off; else start new group past this many chars
+    group_gap_threshold: float = 0.0  # 0 = off; else new group on silence >= Ns (auto-group)
+
+    # Display timing
+    min_group_duration: float = 0.0  # group shown at least this long (anti-flash)
+    group_hold: float = 0.15  # extra seconds a group lingers after its last word ends
     
     # Font settings
     font_name: str = "Impact"
@@ -285,8 +279,10 @@ class RefineRequest(BaseModel):
     video_filename: str
     ai_api_key: Optional[str] = None
     ai_model: Optional[str] = None
+    ai_base_url: Optional[str] = None
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
+    language_code: Optional[str] = None   # ISO source-language hint (e.g. "ja"); None → auto-detect
     diarize: bool = False
     num_speakers: Optional[int] = None
     do_grouping: bool = True
@@ -587,14 +583,26 @@ def _do_render(render_id: str, req: RenderRequest):
         info = get_video_info(str(actual_video_path))
 
         # Generate HTML subtitle file
-        from subtitle_generator import build_custom_groups, group_words
+        from subtitle_generator import build_custom_groups, group_words, adjust_group_timing
         from html_renderer import generate_subtitle_html, render_html_sequence_to_video
         import asyncio
 
         if req.style.use_custom_groups and groups_dicts:
             final_groups = build_custom_groups(words_dicts, groups_dicts)
         else:
-            final_groups = group_words(words_dicts, req.style.words_per_group)
+            final_groups = group_words(
+                words_dicts,
+                req.style.words_per_group,
+                max_chars=req.style.max_chars_per_group,
+                gap_threshold=req.style.group_gap_threshold,
+            )
+
+        # Linger / anti-flash timing (never overlaps the next group)
+        adjust_group_timing(
+            final_groups,
+            min_duration=req.style.min_group_duration,
+            max_hold=req.style.group_hold,
+        )
 
         html_content = generate_subtitle_html(
             words=words_dicts,
@@ -1479,6 +1487,7 @@ def _do_refine(job_id: str, req: RefineRequest):
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             elevenlabs_api_key=req.elevenlabs_api_key,
+            language_code=req.language_code,
             diarize=req.diarize,
             num_speakers=req.num_speakers,
             do_grouping=req.do_grouping,

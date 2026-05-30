@@ -79,11 +79,9 @@ def generate_subtitle_html(words, groups, style, width, height, speakers=None):
     const upper = s.uppercase;
     const italic = s.italic;
     const bold = s.bold;
-    const highlightColor = s.highlight_color && !s.highlight_color.startsWith('#') ? '#' + s.highlight_color : (s.highlight_color || '#FFD700');
     const textColor = s.normal_color && !s.normal_color.startsWith('#') ? '#' + s.normal_color : (s.normal_color || '#FFFFFF');
     const fontSizeASS = s.font_size || 80;
     const fontFamily = s.font_name || 'Impact';
-    const scale = (s.scale_highlight || 115) / 100;
     const glowStrength = s.glow_strength || 0;
     const glowColor = s.glow_color && !s.glow_color.startsWith('#') ? '#' + s.glow_color : (s.glow_color || '#FFD700');
     const outlineColor = s.outline_color && !s.outline_color.startsWith('#') ? '#' + s.outline_color : (s.outline_color || '#000000');
@@ -258,7 +256,7 @@ def generate_subtitle_html(words, groups, style, width, height, speakers=None):
     window.seekTo = function(t) {{
       let activeGroup = null;
       for (const g of groupsList) {{
-        if (t >= g.start && t <= g.end + 0.15) {{ activeGroup = g; break; }}
+        if (t >= g.start && t <= g.end) {{ activeGroup = g; break; }}
       }}
       if (!activeGroup) {{
         applySpeakerLayout(null);
@@ -272,83 +270,37 @@ def generate_subtitle_html(words, groups, style, width, height, speakers=None):
       // Apply speaker-specific layout (avatar + dialog box) if configured.
       // Falls back to the global subtitle layout when speaker is null/disabled.
       applySpeakerLayout(activeGroup.speaker || null);
-      
-      let activeIdx = -1;
-      for (let i = 0; i < activeGroup.words.length; i++) {{
-        if (t >= activeGroup.words[i].start && t <= activeGroup.words[i].end) {{ activeIdx = i; break; }}
-      }}
-      if (activeIdx === -1) {{
-        for (let i = activeGroup.words.length - 1; i >= 0; i--) {{
-          if (t >= activeGroup.words[i].start) {{ activeIdx = i; break; }}
-        }}
-      }}
-      
-      const isDynamic = s.dynamic_mode !== false;
+
       const groupKey = activeGroup.start + '_' + activeGroup.end;
       const isNewGroup = groupKey !== lastGroupKey;
-      
-      if (!isDynamic) {{
-        if (!isNewGroup) return false;
-        if (isNewGroup) {{
-          lastGroupKey = groupKey;
-          const words = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
-          const sentence = words.join(' ');
-          const animName = s.sentence_animation || 'none';
-          const animSpeedMs = s.static_anim_speed || 300;
-          const baseStyle = `color:${{textColor}}; font-style:${{fontStyle}}; font-weight:${{fontWeight}}; text-shadow:${{textShadow}}; --anim-intensity:${{s.anim_intensity/100||1}}`;
-          let html = '';
-          if (animName === 'typewriter') {{
-            const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
-            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-fade-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
-          }} else if (animName === 'cascade') {{
-            const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
-            html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-pop-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
-          }} else {{
-            const animClass = animName !== 'none' ? 'subtitle-anim-' + animName : '';
-            html = `<span class="subtitle-word ${{animClass}}" style="${{baseStyle}}; --anim-speed:${{animSpeedMs}}ms">${{sentence}}</span>`;
-          }}
-          animWrapper.innerHTML = html;
-          return "frame";
-        }}
-        return false;
-      }}
 
-      // Dynamic Mode Loop
-      if (isNewGroup) {{
-        lastGroupKey = groupKey;
-        const groupAnim = (s.group_animation === 'typewriter') ? 'slide-up' : (s.group_animation === 'cascade') ? 'pop-in' : (s.group_animation || 'none');
-        animWrapper.className = ''; 
-        void animWrapper.offsetWidth;
-        if (groupAnim !== 'none') {{
-          animWrapper.style.setProperty('--anim-speed', (s.anim_speed || 200) + 'ms');
-          animWrapper.style.setProperty('--anim-intensity', ((s.anim_intensity || 100) / 100).toString());
-          animWrapper.classList.add('subtitle-anim-' + groupAnim);
-        }}
+      // Static line render: whole caption shown at once (no per-word highlight).
+      if (!isNewGroup) return false;
+      lastGroupKey = groupKey;
+      const tr = (activeGroup.translation || '').trim();
+      let words;
+      if (tr) {{
+        words = (upper ? tr.toUpperCase() : tr).split(/\\s+/);
+      }} else {{
+        words = activeGroup.words.map(w => upper ? w.text.toUpperCase() : w.text);
       }}
-      
-      const html = activeGroup.words.map((w, i) => {{
-        const text = upper ? w.text.toUpperCase() : w.text;
-        const isActive = i === activeIdx;
-        const ws = w.style || {{}};
-        
-        let hlCol = highlightColor;
-        let noCol = textColor;
-        if (ws.highlight_color) hlCol = '#' + ws.highlight_color;
-        if (ws.normal_color) noCol = '#' + ws.normal_color;
-        
-        let color = isActive ? hlCol : noCol;
-        const scaleVal = isActive ? `scale(${{scale}})` : 'scale(1)';
-        const fs = ws.font_size ? `font-size:${{Math.round(ws.font_size * displayedHeight / actualHeight)}}px;` : '';
-        
-        return `<span class="subtitle-word" style="color:${{color}}; transform:${{scaleVal}}; ${{fs}}; font-style:${{fontStyle}}; font-weight:${{fontWeight}}; text-shadow:${{textShadow}};">${{text}}</span>`;
-      }}).join(' ');
-      
-      // Update DOM
-      const stateKey = activeGroup.start + "_" + activeIdx;
-      if (animWrapper.dataset.last === stateKey && !isNewGroup) return false;
+      const sentence = words.join(' ');
+      const animName = s.sentence_animation || 'none';
+      const animSpeedMs = s.static_anim_speed || 300;
+      const baseStyle = `color:${{textColor}}; font-style:${{fontStyle}}; font-weight:${{fontWeight}}; text-shadow:${{textShadow}}; --anim-intensity:${{s.anim_intensity/100||1}}`;
+      let html = '';
+      if (animName === 'typewriter') {{
+        const perWord = Math.max(80, Math.round(animSpeedMs / words.length));
+        html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-fade-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
+      }} else if (animName === 'cascade') {{
+        const perWord = Math.max(60, Math.round(animSpeedMs / words.length));
+        html = words.map((w, i) => `<span class="subtitle-word subtitle-anim-pop-in" style="${{baseStyle}}; --anim-speed:${{perWord}}ms; animation-delay:${{i * perWord}}ms">${{w}}</span>`).join(' ');
+      }} else {{
+        const animClass = animName !== 'none' ? 'subtitle-anim-' + animName : '';
+        html = `<span class="subtitle-word ${{animClass}}" style="${{baseStyle}}; --anim-speed:${{animSpeedMs}}ms">${{sentence}}</span>`;
+      }}
       animWrapper.innerHTML = html;
-      animWrapper.dataset.last = stateKey;
-      return isNewGroup ? "frame" : true;
+      return "frame";
     }};
     
     // Disable CSS animations infinite looping or pausing issues if any. Wait for fonts.

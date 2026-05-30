@@ -38,6 +38,7 @@ const store = reactive({
   // Active transcription model id (mirrors settings.elevenlabs_model).
   transcriptionModel: 'scribe_v1',
   elevenlabsApiKey: '',
+  sourceLanguage: '',   // ISO source-language hint ('' = auto-detect, 'ja' = Japanese)
   words: [],
   videoFilename: '',
   metadata: {},
@@ -49,9 +50,6 @@ const store = reactive({
   // ── Groups ──────────────────────────────
   customGroups: [],
   useCustomGroups: false,
-
-  // ── Mode ────────────────────────────────
-  useDynamicMode: false,
 
   // ── Undo / Redo ─────────────────────────
   undoStack: [],
@@ -71,7 +69,7 @@ const store = reactive({
     fontSize: 78,
     bold: true,
     italic: false,
-    uppercase: true,
+    uppercase: false,
     highlight: '#FFD700',
     textColor: '#FFFFFF',
     outlineColor: '#000000',
@@ -95,6 +93,10 @@ const store = reactive({
     letterSpacing: 0,
     wordGap: 0,
     wpg: 4,
+    maxCharsPerGroup: 0,    // 0 = off; cap rendered chars per group (anti-overflow)
+    groupGapThreshold: 0,   // 0 = off; new group on silence >= Ns (auto-group)
+    minGroupDuration: 0,    // group shown at least this long (anti-flash), seconds
+    groupHold: 0.15,        // extra seconds a group lingers after its last word ends
   },
 
   // ── Status ──────────────────────────────
@@ -304,7 +306,6 @@ function captureState(label) {
     splitPoints: [...store.splitPoints],
     removedSegments: [...store.removedSegments],
     useCustomGroups: store.useCustomGroups,
-    useDynamicMode: store.useDynamicMode,
   };
 }
 
@@ -316,7 +317,6 @@ function restoreSnapshot(snapshot) {
   store.splitPoints = snapshot.splitPoints;
   store.removedSegments = snapshot.removedSegments;
   store.useCustomGroups = snapshot.useCustomGroups;
-  store.useDynamicMode = snapshot.useDynamicMode;
   store.selectedWordIndices = new Set();
   // Only auto-regenerate if we don't have any custom groups in the snapshot.
   // Previously this clobbered the just-restored groups every time.
@@ -389,18 +389,89 @@ export function getSegments(duration) {
 }
 
 export function regenerateAutoGroups() {
-  const wpg = store.style.wpg || 4;
+  const s = store.style;
+  const wpg = s.wpg || 4;
+  const maxChars = s.maxCharsPerGroup || 0;
+  const gapThreshold = s.groupGapThreshold || 0;
   store.customGroups = [];
-  for (let i = 0; i < store.words.length; i += wpg) {
-    const chunk = store.words.slice(i, i + wpg);
-    if (chunk.length === 0) continue;
+  let cur = []; // word indices accumulating into current group
+  const flush = () => {
+    if (cur.length === 0) return;
     store.customGroups.push({
-      word_indices: Array.from({ length: chunk.length }, (_, j) => i + j),
-      start: chunk[0].start,
-      end: chunk[chunk.length - 1].end,
-      speaker: chunk[0].speaker || null,
+      word_indices: cur.slice(),
+      start: store.words[cur[0]].start,
+      end: store.words[cur[cur.length - 1]].end,
+      speaker: store.words[cur[0]].speaker || null,
     });
+    cur = [];
+  };
+  for (let i = 0; i < store.words.length; i++) {
+    const w = store.words[i];
+    if (cur.length && gapThreshold > 0) {
+      const prev = store.words[cur[cur.length - 1]];
+      if ((w.start || 0) - (prev.end || 0) >= gapThreshold) flush();
+    }
+    if (cur.length) {
+      const countAfter = cur.length + 1;
+      const overCount = countAfter > wpg;
+      let overChars = false;
+      if (maxChars > 0) {
+        let chars = cur.reduce((a, idx) => a + (store.words[idx].text || '').length, 0);
+        chars += (w.text || '').length + (countAfter - 1); // + inter-word spaces
+        overChars = chars > maxChars;
+      }
+      if (overCount || overChars) flush();
+    }
+    cur.push(i);
   }
+  flush();
+}
+
+// The caption line shown on screen for a group: explicit translation if set,
+// otherwise the group's source words joined. This is the field a text editor binds to.
+export function getGroupText(g) {
+  if (!g) return '';
+  const tr = (g.translation || '').trim();
+  if (tr) return tr;
+  return (g.word_indices || [])
+    .map(i => (store.words[i] || {}).text || '')
+    .join(' ')
+    .trim();
+}
+
+// Overwrite a group's caption text (stored as `translation`, decoupled from words —
+// exactly like editing a caption line in Premiere). Empty string clears the override
+// so it falls back to the joined source words.
+export function setGroupText(gi, text) {
+  const g = store.customGroups[gi];
+  if (!g) return;
+  const next = (text || '').trim();
+  if ((g.translation || '') === next) return;
+  saveUndoSnapshot('Edit caption ' + (gi + 1) + ' text');
+  g.translation = next;
+  store.useCustomGroups = true;
+}
+
+// Apply linger / anti-flash timing in place. Mirrors backend adjust_group_timing.
+// Never extends a group past the next group's start (no overlap).
+function applyGroupTiming(groups) {
+  const s = store.style;
+  const minDur = s.minGroupDuration || 0;
+  const hold = s.groupHold != null ? s.groupHold : 0.15;
+  if (minDur <= 0 && hold <= 0) return groups;
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i];
+    const naturalEnd = g.end;
+    let end = naturalEnd;
+    if (minDur > 0) end = Math.max(end, g.start + minDur);
+    if (hold > 0) end = Math.max(end, naturalEnd + hold);
+    if (i + 1 < groups.length) {
+      const nextStart = groups[i + 1].start;
+      if (nextStart > g.start) end = Math.min(end, nextStart);
+    }
+    g.end = end;
+  }
+  return groups;
 }
 
 export function getActiveGroups() {
@@ -415,25 +486,49 @@ export function getActiveGroups() {
         words,
         start: g.start,
         end: g.end,
+        translation: g.translation || '',
         speaker: g.speaker || (store.words[indices[0]] || {}).speaker || null,
       });
     }
-    return out;
+    return applyGroupTiming(out);
   }
-  const wpg = store.style.wpg || 4;
+  const s = store.style;
+  const wpg = s.wpg || 4;
+  const maxChars = s.maxCharsPerGroup || 0;
+  const gapThreshold = s.groupGapThreshold || 0;
   const groups = [];
   const visibleWords = store.words.filter((_, i) => !hidden.has(i));
-  for (let i = 0; i < visibleWords.length; i += wpg) {
-    const chunk = visibleWords.slice(i, i + wpg);
-    if (chunk.length === 0) continue;
+  let current = [];
+  const flush = () => {
+    if (current.length === 0) return;
     groups.push({
-      words: chunk,
-      start: chunk[0].start,
-      end: chunk[chunk.length - 1].end,
-      speaker: chunk[0].speaker || null,
+      words: current,
+      start: current[0].start,
+      end: current[current.length - 1].end,
+      speaker: current[0].speaker || null,
     });
+    current = [];
+  };
+  for (const w of visibleWords) {
+    if (current.length && gapThreshold > 0) {
+      const prev = current[current.length - 1];
+      if ((w.start || 0) - (prev.end || 0) >= gapThreshold) flush();
+    }
+    if (current.length) {
+      const countAfter = current.length + 1;
+      const overCount = countAfter > wpg;
+      let overChars = false;
+      if (maxChars > 0) {
+        let chars = current.reduce((a, c) => a + (c.text || '').length, 0);
+        chars += (w.text || '').length + (countAfter - 1);
+        overChars = chars > maxChars;
+      }
+      if (overCount || overChars) flush();
+    }
+    current.push(w);
   }
-  return groups;
+  flush();
+  return applyGroupTiming(groups);
 }
 
 export function getStyleConfig() {
@@ -441,7 +536,10 @@ export function getStyleConfig() {
   return {
     words_per_group: s.wpg || 4,
     use_custom_groups: store.useCustomGroups,
-    dynamic_mode: store.useDynamicMode,
+    max_chars_per_group: s.maxCharsPerGroup || 0,
+    group_gap_threshold: s.groupGapThreshold || 0,
+    min_group_duration: s.minGroupDuration || 0,
+    group_hold: s.groupHold != null ? s.groupHold : 0.15,
     font_name: s.fontFamily,
     font_size: s.fontSize || 80,
     bold: s.bold,
