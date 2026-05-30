@@ -19,14 +19,16 @@ const store = reactive({
     elevenlabs_model: 'scribe_v1',
     elevenlabs_models: ['scribe_v1'],
 
-    gemini_api_key: '',
-    gemini_api_key_set: false,
-    gemini_model: 'gemini-2.0-flash',
-    gemini_models: [
-      'gemini-2.0-flash',
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
-      'gemini-3-flash-preview',
+    ai_api_key: '',
+    ai_api_key_set: false,
+    ai_base_url: 'http://localhost:20128',
+    ai_model: 'kr/claude-sonnet-4.6-thinking',
+    ai_models: [
+      'kr/claude-sonnet-4.6-thinking',
+      'kr/claude-sonnet-4.6',
+      'kr/claude-opus-4.8-thinking',
+      'kr/claude-haiku-4.5-thinking',
+      'kr/auto',
     ],
 
     loaded: false,
@@ -162,7 +164,7 @@ const store = reactive({
 
   // ── Refine Automation ─────────────────────
   refine: {
-    geminiApiKey: '',
+    aiApiKey: '',
     status: '',        // '' | 'queued' | 'processing' | 'done' | 'error'
     step: '',          // 'init' | 'transcribe' | 'silence' | 'analyze' | 'apply' | 'done'
     message: '',
@@ -236,6 +238,58 @@ export function getUniqueSpeakers() {
     if (w.speaker) speakerSet.add(w.speaker);
   }
   return [...speakerSet].sort();
+}
+
+// ── Speaker reassignment / merge (manual diarization fixes) ──
+
+// Resolve display label for a speaker id (custom label > store.speakers > pretty default).
+export function speakerDisplayLabel(spkId) {
+  if (!spkId) return '';
+  const cfg = store.speakerConfig[spkId];
+  if (cfg && cfg.label) return cfg.label;
+  return store.speakers[spkId] || spkId.replace('SPEAKER_', 'Speaker ');
+}
+
+// Next free SPEAKER_NN id not present in words or speakerConfig.
+export function nextSpeakerId() {
+  const used = new Set(getUniqueSpeakers());
+  Object.keys(store.speakerConfig).forEach(k => used.add(k));
+  Object.keys(store.speakers).forEach(k => used.add(k));
+  for (let n = 0; n < 1000; n++) {
+    const id = 'SPEAKER_' + String(n).padStart(2, '0');
+    if (!used.has(id)) return id;
+  }
+  return 'SPEAKER_' + Date.now();
+}
+
+// Reassign a set of word indices to a target speaker id, then resync group speakers.
+export function reassignSpeaker(indices, targetSpeaker) {
+  const idxList = [...indices].filter(i => store.words[i]);
+  if (idxList.length === 0) return;
+  saveUndoSnapshot('Reassign ' + idxList.length + ' word(s) → ' + speakerDisplayLabel(targetSpeaker));
+  for (const i of idxList) store.words[i].speaker = targetSpeaker;
+  syncGroupSpeakers();
+}
+
+// Merge every word of `fromSpeaker` into `intoSpeaker`. Drops the orphaned config.
+export function mergeSpeakerInto(fromSpeaker, intoSpeaker) {
+  if (!fromSpeaker || !intoSpeaker || fromSpeaker === intoSpeaker) return;
+  saveUndoSnapshot('Merge ' + speakerDisplayLabel(fromSpeaker) + ' → ' + speakerDisplayLabel(intoSpeaker));
+  for (const w of store.words) {
+    if (w.speaker === fromSpeaker) w.speaker = intoSpeaker;
+  }
+  delete store.speakerConfig[fromSpeaker];
+  delete store.speakers[fromSpeaker];
+  syncGroupSpeakers();
+}
+
+// Rewrite each custom group's speaker from its first visible word (after edits).
+export function syncGroupSpeakers() {
+  if (!store.customGroups || store.customGroups.length === 0) return;
+  for (const g of store.customGroups) {
+    const first = g.word_indices && g.word_indices.length ? g.word_indices[0] : -1;
+    g.speaker = (store.words[first] || {}).speaker || null;
+  }
 }
 
 // ── Helper actions ─────────────────────────

@@ -87,7 +87,7 @@ export default {
           <h2 class="home-card-title">YouTube Clip Finder</h2>
           <p class="home-card-desc">
             Paste a YouTube link, describe what you're looking for, and let
-            Gemini AI find the best moments. Clips get cut and sent straight
+            9Router AI find the best moments. Clips get cut and sent straight
             to the subtitle workflow.
           </p>
           <div class="home-card-tags">

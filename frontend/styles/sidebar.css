@@ -583,6 +583,25 @@
   border-radius: 999px;
   border: 1px solid var(--border);
 }
+.speaker-merge-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+.speaker-merge-row label { flex-shrink: 0; }
+.speaker-merge-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  background: var(--surface3);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
 .speaker-toggle {
   display: flex;
   align-items: center;

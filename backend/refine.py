@@ -17,12 +17,7 @@ from typing import Optional, Callable
 # For structured output parsing
 from pydantic import BaseModel, Field
 
-try:
-    from google import genai
-    from google.genai import types as genai_types
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
+import nine_router
 
 from transcribe import transcribe_video
 from renderer import get_video_info
@@ -141,11 +136,11 @@ def _analyze_chunk(
     api_key: str,
     reference_text: Optional[str],
     index_offset: int,
-    model: str = "gemini-2.5-flash",
+    model: str = nine_router.DEFAULT_MODEL,
+    base_url: Optional[str] = None,
+    progress_cb: Optional[Callable[[str, str], None]] = None,
 ) -> dict:
-    """Send a single chunk of words to Gemini. Indices in returned result are LOCAL to the chunk."""
-    client = genai.Client(api_key=api_key)
-
+    """Send a single chunk of words to 9Router. Indices in returned result are LOCAL to the chunk."""
     # Build compact transcript from Source A (WhisperX)
     lines = []
     for i, w in enumerate(words):
@@ -167,33 +162,18 @@ def _analyze_chunk(
         f"Analyze following ALL instructions. Return ONLY valid JSON matching the schema."
     )
 
-    prompt = "".join(prompt_parts)
+    user_prompt = "".join(prompt_parts)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=_REFINE_SYSTEM_PROMPT,
-            temperature=0.15,
-            response_mime_type="application/json",
-            response_schema=RefineResponseModel,
-        ),
+    return nine_router.generate_json(
+        system_prompt=_REFINE_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        temperature=0.15,
+        max_tokens=32000,
+        progress_cb=progress_cb,
     )
-
-    raw = response.text.strip()
-
-    # Strip markdown code fences
-    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(
-            f"Gemini returned invalid JSON: {e}\nRaw response:\n{raw[:1500]}"
-        )
-
-    return result
 
 
 def _split_into_chunks(
@@ -227,35 +207,40 @@ def _split_into_chunks(
     return chunks
 
 
-def analyze_with_gemini(
+def analyze_with_ai(
     words: list[dict],
     api_key: str,
     reference_text: Optional[str] = None,
     progress_cb: Optional[Callable[[str, str], None]] = None,
-    model: str = "gemini-2.5-flash",
+    model: str = nine_router.DEFAULT_MODEL,
+    base_url: Optional[str] = None,
 ) -> dict:
     """
-    Send word-level transcript to Gemini for smart grouping and spell correction.
+    Send word-level transcript to the 9Router LLM for smart grouping and spell
+    correction.
 
     For long transcripts, splits into chunks at natural pause boundaries to keep
     prompt size and latency reasonable. Reference text is only sent with the first
     chunk to save tokens.
     """
-    if not GEMINI_AVAILABLE:
-        raise RuntimeError("google-genai is not installed. Run: pip install google-genai")
-
     # Short transcripts: single call.
     if len(words) <= 500:
-        return _analyze_chunk(words, api_key, reference_text, index_offset=0, model=model)
+        return _analyze_chunk(
+            words, api_key, reference_text,
+            index_offset=0, model=model, base_url=base_url, progress_cb=progress_cb,
+        )
 
     # Long transcripts: chunk + merge.
     chunks = _split_into_chunks(words)
     merged = {"optimized_words": [], "groups": []}
     for ci, (start_idx, chunk_words) in enumerate(chunks):
         if progress_cb:
-            progress_cb("analyze", f"Gemini chunk {ci + 1}/{len(chunks)} ({len(chunk_words)} words)…")
+            progress_cb("analyze", f"AI chunk {ci + 1}/{len(chunks)} ({len(chunk_words)} words)…")
         ref = reference_text if ci == 0 else None
-        result = _analyze_chunk(chunk_words, api_key, ref, index_offset=start_idx, model=model)
+        result = _analyze_chunk(
+            chunk_words, api_key, ref,
+            index_offset=start_idx, model=model, base_url=base_url, progress_cb=progress_cb,
+        )
         for ow in result.get("optimized_words", []) or []:
             local = ow.get("index")
             if isinstance(local, int):
@@ -461,8 +446,9 @@ def refine_video(
     video_path: str,
     output_dir: str,
     rendered_dir: str,
-    gemini_api_key: str,
-    gemini_model: Optional[str] = None,
+    ai_api_key: str,
+    ai_model: Optional[str] = None,
+    ai_base_url: Optional[str] = None,
     req_filename: str = "",
     transcription_model: str = "large-v2",
     elevenlabs_api_key: Optional[str] = None,
@@ -478,7 +464,7 @@ def refine_video(
         video_path:      Path to the input video.
         output_dir:      Directory for transcription JSON.
         rendered_dir:    Directory for rendered / cut videos.
-        gemini_api_key:  Google Gemini API key.
+        ai_api_key:      9Router API key.
         progress_cb:     Callback(step, message) for progress updates.
 
     Returns:
@@ -565,21 +551,22 @@ def refine_video(
         except Exception as e:
             log_step("analyze", f"Warning: Failed to load reference captions: {e}")
 
-    # ── Step 4: Gemini analysis ─────────────────────────────
-    log_step("analyze", "Sending transcript to Gemini AI…")
+    # ── Step 4: AI analysis ─────────────────────────────────
+    log_step("analyze", "Sending transcript to 9Router AI…")
 
     if do_grouping:
-        analysis = analyze_with_gemini(
+        analysis = analyze_with_ai(
             adjusted_words,
-            gemini_api_key,
+            ai_api_key,
             reference_text,
             progress_cb=progress_cb,
-            model=(gemini_model or "gemini-2.5-flash"),
+            model=(ai_model or nine_router.DEFAULT_MODEL),
+            base_url=ai_base_url,
         )
-        log_step("analyze", "Gemini analysis complete")
+        log_step("analyze", "AI analysis complete")
     else:
         analysis = {}
-        log_step("analyze", "Skipping Gemini analysis")
+        log_step("analyze", "Skipping AI analysis")
 
     # ── Step 4: Apply results ───────────────────────────────
     log_step("apply", "Applying refinements…")

@@ -3,7 +3,7 @@ import store from '../store.js';
 import {
   fetchSettings, updateSettings,
   addSettingsModel, removeSettingsModel,
-  testElevenlabsKey, testGeminiKey,
+  testElevenlabsKey, testAiKey,
 } from '../api.js';
 
 export default {
@@ -15,17 +15,17 @@ export default {
 
     // Editable copies (so masked redacted keys don't get re-saved as the mask)
     const elevenKey = ref('');
-    const geminiKey = ref('');
+    const aiKey = ref('');
     const elevenKeyDirty = ref(false);
-    const geminiKeyDirty = ref(false);
+    const aiKeyDirty = ref(false);
 
     // New custom model inputs
     const newElevenModel = ref('');
-    const newGeminiModel = ref('');
+    const newAiModel = ref('');
 
     // Test results per provider
     const elevenTest = ref({ state: 'idle', text: '' });
-    const geminiTest = ref({ state: 'idle', text: '' });
+    const aiTest = ref({ state: 'idle', text: '' });
 
     const s = computed(() => store.settings);
 
@@ -35,10 +35,11 @@ export default {
       store.settings.elevenlabs_model = data.elevenlabs_model || 'scribe_v1';
       store.settings.elevenlabs_models = data.elevenlabs_models || ['scribe_v1'];
 
-      store.settings.gemini_api_key = data.gemini_api_key || '';
-      store.settings.gemini_api_key_set = !!data.gemini_api_key_set;
-      store.settings.gemini_model = data.gemini_model || 'gemini-2.0-flash';
-      store.settings.gemini_models = data.gemini_models || [];
+      store.settings.ai_api_key = data.ai_api_key || '';
+      store.settings.ai_api_key_set = !!data.ai_api_key_set;
+      store.settings.ai_base_url = data.ai_base_url || 'http://localhost:20128';
+      store.settings.ai_model = data.ai_model || 'kr/claude-sonnet-4.6-thinking';
+      store.settings.ai_models = data.ai_models || [];
 
       store.settings.loaded = true;
       // Mirror to legacy fields used by the rest of the app.
@@ -60,17 +61,17 @@ export default {
       message.value = { kind: '', text: '' };
       const patch = {
         elevenlabs_model: store.settings.elevenlabs_model,
-        gemini_model: store.settings.gemini_model,
+        ai_model: store.settings.ai_model,
       };
       if (elevenKeyDirty.value) patch.elevenlabs_api_key = elevenKey.value.trim();
-      if (geminiKeyDirty.value) patch.gemini_api_key = geminiKey.value.trim();
+      if (aiKeyDirty.value) patch.ai_api_key = aiKey.value.trim();
       try {
         const data = await updateSettings(patch);
         applyServerSettings(data);
         elevenKey.value = '';
-        geminiKey.value = '';
+        aiKey.value = '';
         elevenKeyDirty.value = false;
-        geminiKeyDirty.value = false;
+        aiKeyDirty.value = false;
         message.value = { kind: 'ok', text: 'Saved.' };
       } catch (e) {
         message.value = { kind: 'error', text: e.message };
@@ -106,31 +107,31 @@ export default {
       }
     }
 
-    async function runGeminiTest() {
-      geminiTest.value = { state: 'running', text: 'Testing…' };
+    async function runAiTest() {
+      aiTest.value = { state: 'running', text: 'Testing…' };
       try {
-        const res = await testGeminiKey(
-          geminiKeyDirty.value ? geminiKey.value.trim() : '',
-          store.settings.gemini_model,
+        const res = await testAiKey(
+          aiKeyDirty.value ? aiKey.value.trim() : '',
+          store.settings.ai_model,
         );
         if (res.ok) {
-          geminiTest.value = {
+          aiTest.value = {
             state: 'ok',
             text: `Key OK · model "${res.model}"${res.sample ? ' · "' + res.sample + '"' : ''}`,
           };
         } else if (res.reason === 'model') {
-          geminiTest.value = {
+          aiTest.value = {
             state: 'error',
             text: `Key works, but model is the problem → ${res.error || 'model unavailable'}`,
           };
         } else {
-          geminiTest.value = {
+          aiTest.value = {
             state: 'error',
             text: `Key rejected → ${res.error || 'Failed'}`,
           };
         }
       } catch (e) {
-        geminiTest.value = { state: 'error', text: e.message };
+        aiTest.value = { state: 'error', text: e.message };
       }
     }
 
@@ -148,15 +149,15 @@ export default {
       }
     }
 
-    async function addGeminiModel() {
-      const m = newGeminiModel.value.trim();
+    async function addAiModel() {
+      const m = newAiModel.value.trim();
       if (!m) return;
       try {
-        const data = await addSettingsModel('gemini', m);
+        const data = await addSettingsModel('ai', m);
         applyServerSettings(data);
-        store.settings.gemini_model = m;
-        await updateSettings({ gemini_model: m });
-        newGeminiModel.value = '';
+        store.settings.ai_model = m;
+        await updateSettings({ ai_model: m });
+        newAiModel.value = '';
       } catch (e) {
         message.value = { kind: 'error', text: e.message };
       }
@@ -176,14 +177,14 @@ export default {
       }
     }
 
-    async function removeGeminiModel(model) {
-      if (model === store.settings.gemini_model) {
+    async function removeAiModel(model) {
+      if (model === store.settings.ai_model) {
         message.value = { kind: 'error', text: 'Switch to a different active model first.' };
         return;
       }
       if (!confirm('Remove "' + model + '" from the list?')) return;
       try {
-        const data = await removeSettingsModel('gemini', model);
+        const data = await removeSettingsModel('ai', model);
         applyServerSettings(data);
       } catch (e) {
         message.value = { kind: 'error', text: e.message };
@@ -191,7 +192,7 @@ export default {
     }
 
     function onElevenKeyInput() { elevenKeyDirty.value = true; }
-    function onGeminiKeyInput() { geminiKeyDirty.value = true; }
+    function onAiKeyInput() { aiKeyDirty.value = true; }
     function goHome() {
       const prev = store.previousAppMode || 'home';
       store.appMode = prev;
@@ -200,13 +201,13 @@ export default {
     return {
       store, s,
       loading, saving, message,
-      elevenKey, geminiKey, elevenKeyDirty, geminiKeyDirty,
-      newElevenModel, newGeminiModel,
-      elevenTest, geminiTest,
-      saveAll, runElevenTest, runGeminiTest,
-      addElevenModel, addGeminiModel,
-      removeElevenModel, removeGeminiModel,
-      onElevenKeyInput, onGeminiKeyInput,
+      elevenKey, aiKey, elevenKeyDirty, aiKeyDirty,
+      newElevenModel, newAiModel,
+      elevenTest, aiTest,
+      saveAll, runElevenTest, runAiTest,
+      addElevenModel, addAiModel,
+      removeElevenModel, removeAiModel,
+      onElevenKeyInput, onAiKeyInput,
       goHome,
     };
   },
@@ -287,40 +288,40 @@ export default {
       </div>
     </section>
 
-    <!-- Gemini card -->
+    <!-- 9Router (Kiro) card -->
     <section class="settings-card">
       <header class="settings-card-head">
-        <h2>✨ Google Gemini</h2>
-        <span class="settings-status" :class="s.gemini_api_key_set ? 'is-set' : 'is-unset'">
-          {{ s.gemini_api_key_set ? 'Key configured' : 'Not configured' }}
+        <h2>✨ 9Router (Kiro)</h2>
+        <span class="settings-status" :class="s.ai_api_key_set ? 'is-set' : 'is-unset'">
+          {{ s.ai_api_key_set ? 'Key configured' : 'Not configured' }}
         </span>
       </header>
 
       <div class="settings-row">
         <label class="settings-label">
           API Key
-          <a class="settings-hint" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Get a free key →</a>
+          <span class="settings-hint">Base URL: <code>{{ s.ai_base_url }}</code></span>
         </label>
         <div class="settings-key-row">
           <input
             type="password"
             class="settings-input"
-            :placeholder="s.gemini_api_key_set ? s.gemini_api_key : 'AIza...'"
-            v-model="geminiKey"
-            @input="onGeminiKeyInput"
+            :placeholder="s.ai_api_key_set ? s.ai_api_key : 'sk-...'"
+            v-model="aiKey"
+            @input="onAiKeyInput"
             autocomplete="off"
           />
-          <button class="btn btn-outline btn-sm" @click="runGeminiTest">Test</button>
+          <button class="btn btn-outline btn-sm" @click="runAiTest">Test</button>
         </div>
-        <div v-if="geminiTest.state !== 'idle'" class="settings-test-result" :class="'settings-test-result--' + geminiTest.state">
-          {{ geminiTest.text }}
+        <div v-if="aiTest.state !== 'idle'" class="settings-test-result" :class="'settings-test-result--' + aiTest.state">
+          {{ aiTest.text }}
         </div>
       </div>
 
       <div class="settings-row">
         <label class="settings-label">Active model</label>
-        <select class="settings-input" v-model="s.gemini_model">
-          <option v-for="m in s.gemini_models" :key="m" :value="m">{{ m }}</option>
+        <select class="settings-input" v-model="s.ai_model">
+          <option v-for="m in s.ai_models" :key="m" :value="m">{{ m }}</option>
         </select>
       </div>
 
@@ -330,23 +331,23 @@ export default {
           <input
             type="text"
             class="settings-input"
-            placeholder="e.g. gemini-3-flash-preview"
-            v-model="newGeminiModel"
-            @keydown.enter="addGeminiModel"
+            placeholder="e.g. kr/claude-opus-4.8-thinking"
+            v-model="newAiModel"
+            @keydown.enter="addAiModel"
           />
-          <button class="btn btn-primary btn-sm" @click="addGeminiModel">+ Add</button>
+          <button class="btn btn-primary btn-sm" @click="addAiModel">+ Add</button>
         </div>
       </div>
 
-      <div v-if="s.gemini_models.length" class="settings-chip-row">
+      <div v-if="s.ai_models.length" class="settings-chip-row">
         <span
-          v-for="m in s.gemini_models"
+          v-for="m in s.ai_models"
           :key="m"
           class="settings-chip"
-          :class="{ 'is-active': m === s.gemini_model }"
+          :class="{ 'is-active': m === s.ai_model }"
         >
           {{ m }}
-          <button class="settings-chip-x" @click="removeGeminiModel(m)" title="Remove">×</button>
+          <button class="settings-chip-x" @click="removeAiModel(m)" title="Remove">×</button>
         </span>
       </div>
     </section>

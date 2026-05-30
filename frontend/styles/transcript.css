@@ -53,6 +53,41 @@
 .toolbar-btn.undo-btn:not(:disabled) { border-color: var(--warning); color: var(--warning); }
 .toolbar-btn.undo-btn:hover:not(:disabled) { background: rgba(253, 203, 110, 0.15); }
 .toolbar-separator { width: 1px; height: 18px; background: var(--border); margin: 0 0.25rem; }
+.toolbar-btn.reassign-btn:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.toolbar-btn.reassign-btn:hover:not(:disabled) { background: var(--accent-dim); }
+.reassign-wrap { position: relative; display: inline-flex; }
+.reassign-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.reassign-menu-title { font-size: 0.65rem; color: var(--text-dim); padding: 2px 4px 4px; }
+.reassign-opt {
+  text-align: left;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.reassign-opt:hover { background: var(--surface3); }
+.reassign-opt-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+}
+.reassign-opt-new { font-size: 0.72rem; color: var(--accent); font-weight: 600; }
 .undo-count {
   font-size: 0.65rem;
   background: var(--warning);

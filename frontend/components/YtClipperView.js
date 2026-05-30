@@ -41,9 +41,9 @@ export default {
     // ── state ────────────────────────────────────────────────
     const url = ref('');
     const criteria = ref('');
-    // Gemini key now lives in Settings — keep a local override field so the user
+    // 9Router key now lives in Settings — keep a local override field so the user
     // can paste a one-off key without going to Settings.
-    const geminiKeyOverride = ref('');
+    const aiKeyOverride = ref('');
     const showKeyOverride = ref(false);
 
     // Advanced clipping signals
@@ -83,7 +83,7 @@ export default {
         case 'queued': return 'Queued';
         case 'extracting': return 'Extracting captions';
         case 'chat': return 'Live chat';
-        case 'analyzing': return 'Gemini analysis';
+        case 'analyzing': return 'AI analysis';
         case 'done': return 'Done';
         case 'error': return 'Error';
         default: return analyzeStage.value || '';
@@ -122,13 +122,13 @@ export default {
       selectedClips.value.reduce((sum, c) => sum + (Number(c.duration) || 0), 0)
     );
     const effectiveKey = computed(() => {
-      const override = geminiKeyOverride.value.trim();
+      const override = aiKeyOverride.value.trim();
       if (override) return override;
       // Empty string here triggers the backend to use the saved key (if any).
-      return store.settings.gemini_api_key_set ? '' : '';
+      return store.settings.ai_api_key_set ? '' : '';
     });
     const hasKey = computed(() =>
-      geminiKeyOverride.value.trim() !== '' || store.settings.gemini_api_key_set
+      aiKeyOverride.value.trim() !== '' || store.settings.ai_api_key_set
     );
     const canAnalyze = computed(() =>
       url.value.trim() &&
@@ -336,7 +336,7 @@ export default {
 
     return {
       url, criteria,
-      geminiKeyOverride, showKeyOverride, hasKey,
+      aiKeyOverride, showKeyOverride, hasKey,
       useChatSignal, includeSetup,
       store,
       analyzeStatus, analyzeMessage, analyzeStage, analyzeElapsed, stageLabel, fmtElapsed,
@@ -376,11 +376,11 @@ export default {
 
       <div class="ytc-field">
         <label class="ytc-label">
-          Gemini API Key
-          <span v-if="store.settings.gemini_api_key_set" class="ytc-hint-text">
+          9Router API Key
+          <span v-if="store.settings.ai_api_key_set" class="ytc-hint-text">
             &ndash; using saved key from
             <a href="#" @click.prevent="store.appMode = 'settings'">Settings</a>
-            &middot; model <code>{{ store.settings.gemini_model }}</code>
+            &middot; model <code>{{ store.settings.ai_model }}</code>
           </span>
           <span v-else class="ytc-hint-text">
             &ndash; no key saved. Add one in
@@ -389,18 +389,18 @@ export default {
           </span>
         </label>
         <button
-          v-if="store.settings.gemini_api_key_set && !showKeyOverride"
+          v-if="store.settings.ai_api_key_set && !showKeyOverride"
           class="btn btn-ghost btn-xs"
           type="button"
           style="align-self:flex-start; margin-bottom:0.4rem;"
           @click="showKeyOverride = true"
         >Use a different key for this run</button>
         <input
-          v-if="!store.settings.gemini_api_key_set || showKeyOverride"
-          v-model="geminiKeyOverride"
+          v-if="!store.settings.ai_api_key_set || showKeyOverride"
+          v-model="aiKeyOverride"
           type="password"
           class="ytc-input ytc-key-input"
-          placeholder="AIza..."
+          placeholder="sk-..."
           :disabled="analyzeStatus === 'running'"
           autocomplete="off"
         />
@@ -451,7 +451,7 @@ export default {
           :disabled="!canAnalyze"
           @click="startAnalyze"
         >
-          {{ analyzeStatus === 'running' ? '\u23F3 Analyzing...' : '\uD83D\uDD0D Find Clips with Gemini' }}
+          {{ analyzeStatus === 'running' ? '\u23F3 Analyzing...' : '\uD83D\uDD0D Find Clips with AI' }}
         </button>
         <button v-if="analyzeStatus !== 'idle'" class="btn btn-ghost" @click="reset">Reset</button>
       </div>
@@ -473,7 +473,7 @@ export default {
       <div class="ytc-stages">
         <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'extracting', done: ['chat','analyzing','done'].includes(analyzeStage) }">1. Captions</span>
         <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'chat', done: ['analyzing','done'].includes(analyzeStage), skipped: !useChatSignal }">2. Live chat</span>
-        <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'analyzing', done: analyzeStage === 'done' }">3. Gemini</span>
+        <span class="ytc-stage-pip" :class="{ active: analyzeStage === 'analyzing', done: analyzeStage === 'done' }">3. AI</span>
       </div>
     </div>
     <div v-if="analyzeStatus === 'error'" class="ytc-card ytc-status-card ytc-status--error">

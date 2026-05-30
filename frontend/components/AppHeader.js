@@ -30,10 +30,11 @@ export default {
         store.settings.elevenlabs_api_key_set = !!s.elevenlabs_api_key_set;
         store.settings.elevenlabs_model = s.elevenlabs_model || 'scribe_v1';
         store.settings.elevenlabs_models = s.elevenlabs_models || ['scribe_v1'];
-        store.settings.gemini_api_key = s.gemini_api_key || '';
-        store.settings.gemini_api_key_set = !!s.gemini_api_key_set;
-        store.settings.gemini_model = s.gemini_model || 'gemini-2.0-flash';
-        store.settings.gemini_models = s.gemini_models || [];
+        store.settings.ai_api_key = s.ai_api_key || '';
+        store.settings.ai_api_key_set = !!s.ai_api_key_set;
+        store.settings.ai_base_url = s.ai_base_url || 'http://localhost:20128';
+        store.settings.ai_model = s.ai_model || 'kr/claude-sonnet-4.6-thinking';
+        store.settings.ai_models = s.ai_models || [];
         store.settings.loaded = true;
         store.transcriptionModel = store.settings.elevenlabs_model;
       } catch {

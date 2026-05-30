@@ -15,5 +15,6 @@ requests
 
 # --- YouTube Clip Finder ---
 yt-dlp
-google-genai
 youtube-transcript-api
+
+# --- AI (9Router gateway, OpenAI-compatible — uses `requests` above) ---

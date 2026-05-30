@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import store, { saveUndoSnapshot, undoAction, redoAction, regenerateAutoGroups, getSpeakerColor, getUniqueSpeakers } from '../store.js';
+import store, { saveUndoSnapshot, undoAction, redoAction, regenerateAutoGroups, getSpeakerColor, getUniqueSpeakers, reassignSpeaker, nextSpeakerId, speakerDisplayLabel } from '../store.js';
 import { transcribeExistingFile } from '../api.js';
 
 export default {
@@ -244,6 +244,39 @@ export default {
       return { background: c.label, color: '#fff' };
     }
 
+    // ── Manual speaker reassignment ──
+    const showReassign = ref(false);
+    const speakerOptions = computed(() => getUniqueSpeakers());
+
+    const reassignTitle = computed(() => {
+      if (store.selectedWordIndices.size === 0) return 'Select words to reassign their speaker';
+      return 'Reassign ' + store.selectedWordIndices.size + ' selected word(s) to a speaker';
+    });
+
+    function toggleReassign() {
+      if (store.selectedWordIndices.size === 0) return;
+      showReassign.value = !showReassign.value;
+    }
+
+    function reassignTo(spkId) {
+      reassignSpeaker(store.selectedWordIndices, spkId);
+      store.selectedWordIndices = new Set();
+      showReassign.value = false;
+    }
+
+    function reassignToNew() {
+      reassignSpeaker(store.selectedWordIndices, nextSpeakerId());
+      store.selectedWordIndices = new Set();
+      showReassign.value = false;
+    }
+
+    function optionLabel(spkId) { return speakerDisplayLabel(spkId); }
+
+    function optionPillStyle(spkId) {
+      const c = getSpeakerColor(spkId);
+      return { background: c.label, color: '#fff' };
+    }
+
     return {
       store, wordCount, undoCount, undoDisabled, undoTitle,
       mergeEnabled, mergeTitle,
@@ -252,6 +285,8 @@ export default {
       newTranscription, reTranscribe, reTranscribing, isSelected, hasStyle, isHidden,
       showMergeModal, mergeText, mergeContext,
       hasSpeakers, isSpeakerStart, speakerLabel, wordSpeakerStyle, speakerBadgeStyle,
+      showReassign, speakerOptions, reassignTitle, toggleReassign,
+      reassignTo, reassignToNew, optionLabel, optionPillStyle,
     };
   },
   template: `
@@ -268,6 +303,22 @@ export default {
         <button class="toolbar-btn merge-btn" @click="openMergeModal" :disabled="!mergeEnabled" :title="mergeTitle">
           ⛓ Merge Words
         </button>
+        <template v-if="hasSpeakers">
+          <div class="toolbar-separator"></div>
+          <div class="reassign-wrap">
+            <button class="toolbar-btn reassign-btn" @click="toggleReassign"
+                    :disabled="store.selectedWordIndices.size === 0" :title="reassignTitle">
+              🎚 Reassign Speaker
+            </button>
+            <div v-if="showReassign && store.selectedWordIndices.size > 0" class="reassign-menu">
+              <div class="reassign-menu-title">Move {{ store.selectedWordIndices.size }} word(s) to:</div>
+              <button v-for="spk in speakerOptions" :key="spk" class="reassign-opt" @click="reassignTo(spk)">
+                <span class="reassign-opt-pill" :style="optionPillStyle(spk)">{{ optionLabel(spk) }}</span>
+              </button>
+              <button class="reassign-opt reassign-opt-new" @click="reassignToNew">+ New speaker</button>
+            </div>
+          </div>
+        </template>
       </div>
       <div class="word-list" id="word-list">
         <template v-for="(w, i) in store.words" :key="i">

@@ -37,12 +37,12 @@ from reframe_renderer import (
 )
 from subtitle_generator import generate_ass, save_ass, generate_srt
 from transcribe import transcribe_video
-from yt_clipper import extract_transcript, analyze_with_gemini, download_and_cut_clips
+from yt_clipper import extract_transcript, analyze_with_ai, download_and_cut_clips
 import yt_cache
 from refine import refine_video
 from settings import (
     load_settings, save_settings,
-    test_elevenlabs_key, test_gemini_key,
+    test_elevenlabs_key, test_ai_key,
     add_model, remove_model,
 )
 
@@ -283,8 +283,8 @@ class TrimRequest(BaseModel):
 
 class RefineRequest(BaseModel):
     video_filename: str
-    gemini_api_key: str
-    gemini_model: Optional[str] = None
+    ai_api_key: Optional[str] = None
+    ai_model: Optional[str] = None
     transcription_model: Optional[str] = "large-v2"
     elevenlabs_api_key: Optional[str] = None
     diarize: bool = False
@@ -295,7 +295,8 @@ class RefineRequest(BaseModel):
 class YtAnalyzeRequest(BaseModel):
     url: str
     criteria: str = ""          # empty → auto (find all clippable moments)
-    gemini_api_key: str         # required — user provides it each time, never stored
+    ai_api_key: Optional[str] = None   # falls back to stored settings key
+    ai_model: Optional[str] = None
     use_chat_signal: bool = True
     include_setup: bool = True
 
@@ -317,7 +318,7 @@ class YtCutRequest(BaseModel):
 
 @app.get("/status")
 async def system_status():
-    """Return ElevenLabs/Gemini key + model availability and FFmpeg status."""
+    """Return ElevenLabs/AI key + model availability and FFmpeg status."""
     s = load_settings()
     return {
         "status": "ok",
@@ -326,9 +327,10 @@ async def system_status():
             "configured": bool(s.get("elevenlabs_api_key")),
             "model": s.get("elevenlabs_model", "scribe_v1"),
         },
-        "gemini": {
-            "configured": bool(s.get("gemini_api_key")),
-            "model": s.get("gemini_model", "gemini-2.0-flash"),
+        "ai": {
+            "configured": bool(s.get("ai_api_key")),
+            "model": s.get("ai_model", "kr/claude-sonnet-4.6-thinking"),
+            "base_url": s.get("ai_base_url", ""),
         },
     }
 
@@ -1185,8 +1187,9 @@ async def get_trim_status(job_id: str):
 
 
 def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
-                   use_chat_signal: bool = True, include_setup: bool = True):
-    """Background task: extract transcript + optional chat-hype + Gemini analysis."""
+                   use_chat_signal: bool = True, include_setup: bool = True,
+                   ai_model: Optional[str] = None, ai_base_url: Optional[str] = None):
+    """Background task: extract transcript + optional chat-hype + 9Router AI analysis."""
     import time as _time
     from yt_clipper import _extract_video_id
     t0 = _time.time()
@@ -1335,15 +1338,17 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
 
         yt_analyze_jobs[job_id] = {
             "status": "analyzing",
-            "message": "Sending transcript to Gemini AI…",
+            "message": "Sending transcript to 9Router AI…",
             "elapsed": _elapsed(),
         }
-        clips = analyze_with_gemini(
+        clips = analyze_with_ai(
             transcript_data,
             criteria,
             api_key,
             chat_buckets=chat_buckets,
             include_setup=include_setup,
+            model=ai_model,
+            base_url=ai_base_url,
         )
 
         yt_analyze_jobs[job_id] = {
@@ -1366,12 +1371,11 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
 
 @app.post("/yt-clip/analyze")
 async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTasks):
-    """Start background job: extract YT captions → Gemini analysis → proposed clips."""
-    api_key = req.gemini_api_key.strip()
-    if not api_key:
-        api_key = (load_settings().get("gemini_api_key") or "").strip()
-    if not api_key:
-        raise HTTPException(status_code=400, detail="Gemini API key is required.")
+    """Start background job: extract YT captions → 9Router AI analysis → proposed clips."""
+    s = load_settings()
+    api_key = (req.ai_api_key or "").strip() or (s.get("ai_api_key") or "").strip()
+    ai_model = (req.ai_model or s.get("ai_model") or "").strip() or None
+    ai_base_url = (s.get("ai_base_url") or "").strip() or None
     job_id = uuid.uuid4().hex[:8]
     yt_analyze_jobs[job_id] = {"status": "queued", "message": "Queued…"}
     background_tasks.add_task(
@@ -1382,6 +1386,8 @@ async def yt_clip_analyze(req: YtAnalyzeRequest, background_tasks: BackgroundTas
         api_key,
         req.use_chat_signal,
         req.include_setup,
+        ai_model,
+        ai_base_url,
     )
     return {"job_id": job_id}
 
@@ -1467,8 +1473,9 @@ def _do_refine(job_id: str, req: RefineRequest):
             video_path=str(video_path),
             output_dir=str(OUTPUT_DIR),
             rendered_dir=str(RENDERED_DIR),
-            gemini_api_key=req.gemini_api_key,
-            gemini_model=req.gemini_model,
+            ai_api_key=req.ai_api_key,
+            ai_model=req.ai_model,
+            ai_base_url=req.ai_base_url,
             req_filename=req.video_filename,
             transcription_model=req.transcription_model,
             elevenlabs_api_key=req.elevenlabs_api_key,
@@ -1505,16 +1512,13 @@ def _do_refine(job_id: str, req: RefineRequest):
 @app.post("/refine")
 async def start_refine(req: RefineRequest, background_tasks: BackgroundTasks):
     """Start a background refine job. Returns job_id for polling."""
-    # Fallback chain: request → settings.gemini_api_key. Mirrors /yt-clip/analyze
+    # Fallback chain: request → settings.ai_api_key. Mirrors /yt-clip/analyze
     # so users with a key configured in Settings don't have to paste it again.
     s = load_settings()
-    gem_key = (req.gemini_api_key or "").strip() or (s.get("gemini_api_key") or "").strip()
-    if not gem_key:
-        raise HTTPException(
-            status_code=400,
-            detail="Gemini API key is required. Configure one in Settings or paste it on this page.",
-        )
-    req.gemini_api_key = gem_key
+    ai_key = (req.ai_api_key or "").strip() or (s.get("ai_api_key") or "").strip()
+    req.ai_api_key = ai_key
+    req.ai_model = (req.ai_model or s.get("ai_model") or "").strip() or None
+    req.ai_base_url = (s.get("ai_base_url") or "").strip() or None
     # ElevenLabs key is only needed for scribe_v2; use the same fallback.
     if req.transcription_model == "scribe_v2":
         el_key = (req.elevenlabs_api_key or "").strip() or (s.get("elevenlabs_api_key") or "").strip()
@@ -1550,9 +1554,10 @@ class SettingsPatch(BaseModel):
     elevenlabs_api_key: Optional[str] = None
     elevenlabs_model: Optional[str] = None
     elevenlabs_models: Optional[list[str]] = None
-    gemini_api_key: Optional[str] = None
-    gemini_model: Optional[str] = None
-    gemini_models: Optional[list[str]] = None
+    ai_api_key: Optional[str] = None
+    ai_model: Optional[str] = None
+    ai_models: Optional[list[str]] = None
+    ai_base_url: Optional[str] = None
 
 
 class TestKeyRequest(BaseModel):
@@ -1561,14 +1566,14 @@ class TestKeyRequest(BaseModel):
 
 
 class ModelMutation(BaseModel):
-    provider: str  # "elevenlabs" | "gemini"
+    provider: str  # "elevenlabs" | "ai"
     model: str
 
 
 def _redact(s: dict) -> dict:
     """Mask API keys before sending to client."""
     out = dict(s)
-    for k in ("elevenlabs_api_key", "gemini_api_key"):
+    for k in ("elevenlabs_api_key", "ai_api_key"):
         v = out.get(k) or ""
         if v:
             out[k] = "•" * 6 + v[-4:]
@@ -1618,13 +1623,14 @@ async def test_elevenlabs(req: TestKeyRequest):
     return test_elevenlabs_key(key)
 
 
-@app.post("/settings/test/gemini")
-async def test_gemini(req: TestKeyRequest):
-    """Test a Gemini key against a specific model."""
+@app.post("/settings/test/ai")
+async def test_ai(req: TestKeyRequest):
+    """Test a 9Router key against a specific model."""
     s = load_settings()
-    key = req.api_key.strip() or s.get("gemini_api_key", "")
-    model = (req.model or s.get("gemini_model") or "gemini-2.0-flash").strip()
-    return test_gemini_key(key, model)
+    key = req.api_key.strip() or s.get("ai_api_key", "")
+    model = (req.model or s.get("ai_model") or "kr/claude-sonnet-4.6-thinking").strip()
+    base_url = (s.get("ai_base_url") or "").strip() or None
+    return test_ai_key(key, model, base_url)
 
 
 # ─── Static Files ──────────────────────────────────────────

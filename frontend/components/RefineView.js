@@ -7,7 +7,7 @@ export default {
   setup() {
     const uploads = ref([]);
     const loading = ref(false);
-    const apiKey = ref(store.refine.geminiApiKey || '');
+    const apiKey = ref(store.refine.aiApiKey || '');
     const selectedFile = ref(store.refine.videoFilename || '');
     const dragover = ref(false);
     const uploading = ref(false);
@@ -23,9 +23,9 @@ export default {
     const numSpeakers = ref(null);
 
     // ── API key resolution ─────────────────────────────────
-    // Prefer the Gemini key configured in Settings. Only require manual entry
+    // Prefer the 9Router key configured in Settings. Only require manual entry
     // when the backend has no stored key. Same logic mirrors YtClipperView.
-    const geminiKeyConfigured = computed(() => !!store.settings.gemini_api_key_set);
+    const aiKeyConfigured = computed(() => !!store.settings.ai_api_key_set);
     const elevenlabsKeyConfigured = computed(() => !!store.settings.elevenlabs_api_key_set);
     const showKeyInput = ref(false);
 
@@ -63,7 +63,7 @@ export default {
       return {
         init: 'Initializing…',
         transcribe: 'Transcribing with ' + modelName,
-        analyze: 'Analyzing with Gemini AI',
+        analyze: 'Analyzing with 9Router AI',
         apply: 'Applying subtitles',
         done: 'Complete!',
       };
@@ -118,7 +118,7 @@ export default {
     }
 
     function canStart() {
-      const hasKey = geminiKeyConfigured.value || apiKey.value.trim();
+      const hasKey = aiKeyConfigured.value || apiKey.value.trim();
       const hasElKey = store.transcriptionModel !== 'scribe_v2'
         || elevenlabsKeyConfigured.value
         || (store.elevenlabsApiKey || '').trim();
@@ -132,7 +132,7 @@ export default {
       step.value = 'processing';
       progress.value = { step: 'init', message: 'Preparing…' };
       // Cache pasted key only — backend resolves the configured one itself.
-      if (apiKey.value.trim()) store.refine.geminiApiKey = apiKey.value.trim();
+      if (apiKey.value.trim()) store.refine.aiApiKey = apiKey.value.trim();
 
       let filename = selectedFile.value;
 
@@ -163,7 +163,7 @@ export default {
       try {
         const { job_id } = await startRefineJob({
           video_filename: filename,
-          gemini_api_key: apiKey.value.trim(),
+          ai_api_key: apiKey.value.trim(),
           transcription_model: store.transcriptionModel,
           elevenlabs_api_key: store.transcriptionModel === 'scribe_v2' ? store.elevenlabsApiKey.trim() : null,
           diarize: doDiarize.value,
@@ -288,7 +288,7 @@ export default {
       onFileSelected, onDropFile, canStart, startRefine, openInEditor, goHome, reset,
       sortMode, processedUploads, collapsedFolders, toggleFolder,
       doGrouping, doDiarize, numSpeakers, deleteFile,
-      geminiKeyConfigured, elevenlabsKeyConfigured, showKeyInput,
+      aiKeyConfigured, elevenlabsKeyConfigured, showKeyInput,
     };
   },
   template: `
@@ -345,19 +345,18 @@ export default {
           </div>
         </div>
 
-        <!-- Gemini API Key -->
+        <!-- 9Router API Key -->
         <div class="diarize-options" style="max-width: 560px; width: 100%; margin-top: 1rem;">
           <div style="background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem 1rem;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem;">
-              <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-dim);">🔑 Gemini API Key</span>
-              <span v-if="geminiKeyConfigured && !showKeyInput" style="display:flex; align-items:center; gap:0.5rem;">
+              <span style="font-size: 0.78rem; font-weight: 600; color: var(--text-dim);">🔑 9Router API Key</span>
+              <span v-if="aiKeyConfigured && !showKeyInput" style="display:flex; align-items:center; gap:0.5rem;">
                 <span style="font-size:0.72rem; color: var(--success); font-weight:600;">✓ Using key from Settings</span>
                 <button class="btn btn-outline btn-sm" style="font-size:0.7rem; padding:2px 8px;" @click="showKeyInput = true">Override</button>
               </span>
-              <a v-else href="https://aistudio.google.com/apikey" target="_blank" style="color: var(--accent); font-size: 0.72rem; text-decoration: underline; text-underline-offset: 2px;">Get one free</a>
             </div>
-            <input v-if="!geminiKeyConfigured || showKeyInput" type="password" v-model="apiKey"
-                   :placeholder="geminiKeyConfigured ? 'Override stored key (optional)…' : 'Paste your Google Gemini API key…'"
+            <input v-if="!aiKeyConfigured || showKeyInput" type="password" v-model="apiKey"
+                   :placeholder="aiKeyConfigured ? 'Override stored key (optional)…' : 'Paste your 9Router API key…'"
                    style="width: 100%; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; color: var(--text); font-size: 0.8rem; outline: none; font-family: monospace;" />
           </div>
         </div>

@@ -166,7 +166,7 @@ export async function pollReframeStatus(jobId) {
 
 // ── YouTube Clip Finder ──────────────────────────────────────
 
-export async function ytAnalyze(url, criteria, geminiApiKey, opts = {}) {
+export async function ytAnalyze(url, criteria, aiApiKey, opts = {}) {
   const {
     useChatSignal = true,
     includeSetup = true,
@@ -177,7 +177,7 @@ export async function ytAnalyze(url, criteria, geminiApiKey, opts = {}) {
     body: JSON.stringify({
       url,
       criteria,
-      gemini_api_key: geminiApiKey,
+      ai_api_key: aiApiKey,
       use_chat_signal: useChatSignal,
       include_setup: includeSetup,
     }),
@@ -308,8 +308,8 @@ export async function testElevenlabsKey(apiKey) {
   return res.json();
 }
 
-export async function testGeminiKey(apiKey, model) {
-  const res = await fetch('/settings/test/gemini', {
+export async function testAiKey(apiKey, model) {
+  const res = await fetch('/settings/test/ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ api_key: apiKey || '', model: model || null }),

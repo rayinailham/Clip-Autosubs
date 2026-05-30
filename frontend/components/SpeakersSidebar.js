@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue';
-import store, { getUniqueSpeakers, getSpeakerColor } from '../store.js';
+import store, { getUniqueSpeakers, getSpeakerColor, mergeSpeakerInto, speakerDisplayLabel } from '../store.js';
 import { uploadAvatar, avatarURL } from '../api.js';
 
 /**
@@ -109,11 +109,31 @@ export default {
       });
     }
 
+    // ── Merge a mis-split speaker into another ──
+    const mergeTarget = ref({}); // spkId -> selected target id
+
+    function mergeOptions(spkId) {
+      return uniqueSpeakers.value.filter(id => id !== spkId);
+    }
+
+    function labelFor(spkId) {
+      return speakerDisplayLabel(spkId);
+    }
+
+    function doMerge(fromSpkId) {
+      const into = mergeTarget.value[fromSpkId];
+      if (!into) return;
+      if (!confirm('Merge "' + labelFor(fromSpkId) + '" into "' + labelFor(into) + '"?\nAll their words move over. This speaker is removed.')) return;
+      mergeSpeakerInto(fromSpkId, into);
+      delete mergeTarget.value[fromSpkId];
+    }
+
     return {
       store, uniqueSpeakers, hasSpeakers,
       POSITION_PRESETS, speakerColorPill, defaultLabel,
       entry, applyPreset, onAvatarFile, clearAvatar, avatarSrc,
       uploadingFor, uploadMsg, applyToAll,
+      mergeTarget, mergeOptions, labelFor, doMerge,
     };
   },
   template: `
@@ -126,6 +146,15 @@ export default {
       <div v-for="spkId in uniqueSpeakers" :key="spkId" class="speaker-card">
         <div class="speaker-card-header">
           <span class="speaker-id-pill" :style="speakerColorPill(spkId)">{{ defaultLabel(spkId) }}</span>
+        </div>
+
+        <div v-if="mergeOptions(spkId).length" class="speaker-merge-row">
+          <label>Merge into</label>
+          <select v-model="mergeTarget[spkId]">
+            <option value="">Choose speaker…</option>
+            <option v-for="t in mergeOptions(spkId)" :key="t" :value="t">{{ labelFor(t) }}</option>
+          </select>
+          <button class="btn btn-outline btn-sm" :disabled="!mergeTarget[spkId]" @click="doMerge(spkId)" title="Move all of this speaker's words into the chosen speaker">Merge</button>
         </div>
 
         <div class="speaker-role-row">

@@ -1,7 +1,7 @@
 """
 YT Clipper — Three-stage pipeline
   1. extract_transcript(url)      → full timestamped transcript from YT CC or auto-captions
-  2. analyze_with_gemini(...)     → list of clip suggestions [{title,start,end,reason}]
+  2. analyze_with_ai(...)         → list of clip suggestions [{title,start,end,reason}]
   3. download_and_cut(url, clips) → downloads video, cuts each clip → saves to uploads/
 """
 
@@ -31,12 +31,7 @@ try:
 except ImportError:
     YT_TRANSCRIPT_API_AVAILABLE = False
 
-try:
-    from google import genai
-    from google.genai import types as genai_types
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
+import nine_router
 
 
 # ─── Transcript Extraction ────────────────────────────────────────────────────
@@ -967,6 +962,95 @@ def walkback_setup(
     return clips
 
 
+# ─── Premature-ending guard (walk clip END forward) ──────────────────────────
+
+_END_PUNCT = (".", "?", "!", "。", "？", "！", "…")
+
+
+def _bucket_active_at(chat_buckets: Optional[list[dict]], t: float) -> bool:
+    """True if a chat bucket covering time `t` shows a spike / wall / paid signal."""
+    if not chat_buckets:
+        return False
+    for b in chat_buckets:
+        bs = float(b.get("t_start", 0.0))
+        if bs <= t < bs + 15.0:  # 15s buckets
+            return bool(
+                b.get("spike") or b.get("emote_wall")
+                or b.get("sc_count") or b.get("members")
+            )
+    return False
+
+
+def walkforward_end(
+    clips: list[dict],
+    segments: list[dict],
+    video_duration: float,
+    chat_buckets: Optional[list[dict]] = None,
+    max_forward: float = 45.0,
+    max_clip_len: float = 240.0,
+) -> list[dict]:
+    """
+    Protect against premature clip endings. For each clip, walk transcript
+    FORWARD from clip.end (≤max_forward seconds) to the nearest natural close:
+      1. a segment that ends in sentence punctuation, OR
+      2. a >=1.0s silence gap after a segment (natural pause).
+    If live chat is still spiking / walling at the candidate end, keep extending
+    (a moment whose reaction is still going hasn't finished). Never exceeds the
+    video duration or max_clip_len.
+    """
+    if not segments:
+        return clips
+
+    for clip in clips:
+        c_start = float(clip["start"])
+        original_end = float(clip["end"])
+        # Hard ceiling: respect max clip length and the video bounds.
+        ceiling = min(video_duration or original_end + max_forward,
+                      c_start + max_clip_len,
+                      original_end + max_forward)
+        if ceiling <= original_end:
+            continue
+
+        best_end = None
+        for idx, seg in enumerate(segments):
+            s_end = float(seg["end"])
+            # Only consider segments ending after the current end, within window.
+            if s_end <= original_end:
+                continue
+            if s_end > ceiling:
+                break
+
+            text = (seg.get("text") or "").strip()
+            ends_sentence = text.endswith(_END_PUNCT)
+
+            # Natural pause: gap to the next segment >= 1.0s (or last segment).
+            gap_ok = False
+            if idx + 1 < len(segments):
+                gap = float(segments[idx + 1]["start"]) - s_end
+                gap_ok = gap >= 1.0
+            else:
+                gap_ok = True
+
+            if not (ends_sentence or gap_ok):
+                continue
+
+            # If chat is still hot right at this boundary, the moment isn't done —
+            # keep looking for a later, calmer close.
+            if _bucket_active_at(chat_buckets, s_end):
+                best_end = s_end  # remember it, but keep scanning
+                continue
+
+            best_end = s_end
+            break
+
+        if best_end is not None and best_end > original_end + 0.5:
+            new_end = round(min(best_end, ceiling), 2)
+            clip["end"] = new_end
+            clip["duration"] = round(new_end - c_start, 2)
+
+    return clips
+
+
 # ─── Gemini Analysis ─────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
@@ -981,6 +1065,11 @@ Rules:
   they're walking into. Cold-open clips that start mid-action are bad clips.
 - Do not overlap clips unless they represent clearly distinct highlights.
 - Return 3–15 clips unless the user specifically asks for more or fewer.
+
+Output language:
+- ALWAYS write "title" and "reason" in ENGLISH, even when the transcript is in
+  Japanese or any other language. Translate/summarize the moment into natural
+  English. Do not output Japanese (or other non-English) text in these fields.
 
 Opening-song warning:
 - The first 15-90 seconds of streams often contain an opening song or BGM intro with
@@ -1040,34 +1129,29 @@ Respond ONLY with a JSON array in this exact format (no markdown, no explanation
 """
 
 
-def analyze_with_gemini(
+def analyze_with_ai(
     transcript_data: dict,
     criteria: str,
     api_key: str,
     chat_buckets: Optional[list[dict]] = None,
     include_setup: bool = True,
+    model: str = nine_router.DEFAULT_MODEL,
+    base_url: Optional[str] = None,
 ) -> list[dict]:
     """
-    Send the transcript (and optional chat-hype timeline) to Gemini and ask it
-    to identify clip-worthy moments.
+    Send the transcript (and optional chat-hype timeline) to the 9Router LLM and
+    ask it to identify clip-worthy moments.
 
     Args:
         transcript_data: output from extract_transcript()
         criteria: user's description of what clips they want (or empty for auto)
-        api_key: Google Gemini API key (provided per-request, never stored)
+        api_key: 9Router API key (provided per-request, never stored)
         chat_buckets: optional output of bucket_chat() to inject hype signal
         include_setup: if True, walk start back ≤120s to nearest story-setup anchor
 
     Returns:
         list of clip dicts: [{id, title, start, end, reason, duration, selected}]
     """
-    if not GEMINI_AVAILABLE:
-        raise RuntimeError(
-            "google-genai is not installed. Run: pip install google-genai"
-        )
-
-    client = genai.Client(api_key=api_key)
-
     title = transcript_data["video_title"]
     duration = transcript_data["video_duration"]
     plain_text = transcript_data["plain_text"]
@@ -1100,42 +1184,29 @@ User criteria: {user_criteria}
 {intro_note}{chat_block}
 Transcript (format: [HH:MM:SS] text):
 {plain_text}
+
+Return ONLY a JSON object with a single key "clips" whose value is the array of \
+clip objects described above. Example: {{"clips": [{{"id": 1, "title": "...", \
+"start": 1530.0, "end": 1620.0, "reason": "..."}}]}}
 """
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt,
-        config=genai_types.GenerateContentConfig(
-            system_instruction=_SYSTEM_PROMPT,
-            temperature=0.3,
-            response_mime_type="application/json",
-            response_schema={
-                "type": "ARRAY",
-                "items": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "id":     {"type": "INTEGER"},
-                        "title":  {"type": "STRING"},
-                        "start":  {"type": "NUMBER"},
-                        "end":    {"type": "NUMBER"},
-                        "reason": {"type": "STRING"},
-                    },
-                    "required": ["id", "title", "start", "end", "reason"],
-                    "propertyOrdering": ["id", "title", "start", "end", "reason"],
-                },
-            },
-        ),
+    parsed = nine_router.generate_json(
+        system_prompt=_SYSTEM_PROMPT,
+        user_prompt=prompt,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        temperature=0.3,
+        max_tokens=32000,
     )
-    raw = response.text.strip()
 
-    # Defensive: strip markdown fences if model still emits them despite schema
-    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
-    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE)
-
-    try:
-        clips = json.loads(raw)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"Gemini returned invalid JSON: {e}\nRaw response:\n{raw[:500]}")
+    # Accept either a bare array or {"clips": [...]} wrapper.
+    if isinstance(parsed, dict):
+        clips = parsed.get("clips") or parsed.get("results") or []
+    elif isinstance(parsed, list):
+        clips = parsed
+    else:
+        clips = []
 
     # ── Heuristic: detect if Gemini returned minutes instead of seconds ──────
     # If the video is long (>5 min) but all clip timestamps are tiny (<3 min
@@ -1188,6 +1259,17 @@ Transcript (format: [HH:MM:SS] text):
             segments,
             first_speech_t=first_speech_t,
             max_back=120.0,
+        )
+
+    # ── Premature-ending guard: walk clip END forward to a natural close ──
+    if segments:
+        validated = walkforward_end(
+            validated,
+            segments,
+            video_duration=duration,
+            chat_buckets=chat_buckets,
+            max_forward=45.0,
+            max_clip_len=240.0,
         )
 
     # ── Factor tagging: explain WHY each clip was chosen ──────────────────

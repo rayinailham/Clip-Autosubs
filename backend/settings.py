@@ -16,19 +16,50 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = BASE_DIR / "config"
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
 
+# opencode stores the 9Router provider (baseURL + apiKey) here. We reuse it so
+# the user never has to paste the key/URL into this app's Settings manually.
+OPENCODE_CONFIG_PATH = Path.home() / ".config" / "opencode" / "opencode.json"
+OPENCODE_PROVIDER_ID = "9router"
+
+
+def _read_opencode_9router() -> dict:
+    """
+    Return {base_url, api_key} pulled from the opencode 9Router provider, or {}.
+    baseURL has any trailing /v1 stripped because nine_router appends it.
+    """
+    try:
+        with open(OPENCODE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg = json.load(f) or {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    prov = ((cfg.get("provider") or {}).get(OPENCODE_PROVIDER_ID) or {})
+    opts = prov.get("options") or {}
+    base_url = (opts.get("baseURL") or "").strip().rstrip("/")
+    if base_url.endswith("/v1"):
+        base_url = base_url[: -len("/v1")]
+    return {
+        "base_url": base_url,
+        "api_key": (opts.get("apiKey") or "").strip(),
+    }
+
 
 DEFAULTS = {
     "elevenlabs_api_key": "",
     "elevenlabs_model": "scribe_v1",
     "elevenlabs_models": ["scribe_v1"],
 
-    "gemini_api_key": "",
-    "gemini_model": "gemini-2.0-flash",
-    "gemini_models": [
-        "gemini-2.0-flash",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
+    # 9Router (Kiro) — OpenAI-compatible gateway.
+    "ai_api_key": "",
+    "ai_base_url": "http://localhost:20128",
+    "ai_model": "kr/claude-sonnet-4.6",
+    "ai_models": [
+        "kr/claude-sonnet-4.6",
+        "kr/claude-sonnet-4.6-thinking",
+        "kr/claude-opus-4.8-thinking",
+        "kr/claude-haiku-4.5",
+        "kr/claude-haiku-4.5-thinking",
+        "kr/auto",
     ],
 }
 
@@ -51,10 +82,18 @@ def load_settings() -> dict:
     out = dict(DEFAULTS)
     out.update(data)
 
+    # Seed AI key/base_url from opencode's 9Router provider when not set here,
+    # so the user doesn't have to configure it twice.
+    oc = _read_opencode_9router()
+    if not (out.get("ai_api_key") or "").strip() and oc.get("api_key"):
+        out["ai_api_key"] = oc["api_key"]
+    if not (out.get("ai_base_url") or "").strip() and oc.get("base_url"):
+        out["ai_base_url"] = oc["base_url"]
+
     # Make sure model lists always include the active model.
     for active_key, list_key in (
         ("elevenlabs_model", "elevenlabs_models"),
-        ("gemini_model", "gemini_models"),
+        ("ai_model", "ai_models"),
     ):
         active = out.get(active_key)
         models = list(out.get(list_key) or [])
@@ -78,7 +117,7 @@ def save_settings(patch: dict) -> dict:
     # Auto-add active model into the list if missing.
     for active_key, list_key in (
         ("elevenlabs_model", "elevenlabs_models"),
-        ("gemini_model", "gemini_models"),
+        ("ai_model", "ai_models"),
     ):
         active = current.get(active_key)
         models = list(current.get(list_key) or [])
@@ -155,41 +194,7 @@ def test_elevenlabs_key(api_key: str) -> dict:
     return {"ok": False, "error": f"HTTP {res.status_code}: {res.text[:200]}"}
 
 
-def test_gemini_key(api_key: str, model: Optional[str] = None) -> dict:
-    """Verify a Gemini key by calling the lightweight generate endpoint."""
-    if not api_key or not api_key.strip():
-        return {"ok": False, "error": "API key is empty."}
-
-    model = (model or "gemini-2.0-flash").strip()
-    api_key = api_key.strip()
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
-    )
-    body = {
-        "contents": [{"parts": [{"text": "ping"}]}],
-        "generationConfig": {"maxOutputTokens": 4, "temperature": 0},
-    }
-    try:
-        res = requests.post(url, json=body, timeout=20)
-    except requests.RequestException as e:
-        return {"ok": False, "error": f"Network error: {e}"}
-
-    if res.status_code == 200:
-        try:
-            data = res.json()
-            txt = (
-                (data.get("candidates") or [{}])[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-            )
-        except (ValueError, IndexError, AttributeError):
-            txt = ""
-        return {"ok": True, "model": model, "sample": txt.strip()[:50]}
-    if res.status_code in (400, 401, 403):
-        return {
-            "ok": False,
-            "error": f"Key/model rejected (HTTP {res.status_code}). {res.text[:200]}",
-        }
-    return {"ok": False, "error": f"HTTP {res.status_code}: {res.text[:200]}"}
+def test_ai_key(api_key: str, model: Optional[str] = None, base_url: Optional[str] = None) -> dict:
+    """Verify a 9Router key/model by hitting the gateway with a tiny prompt."""
+    import nine_router
+    return nine_router.test_key(api_key, model, base_url)
