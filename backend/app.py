@@ -1210,6 +1210,9 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
     video_id = _extract_video_id(url)
     cached = yt_cache.load(video_id) if video_id else None
     if video_id:
+        # Register before wiping so concurrent sessions don't delete each
+        # other's in-flight checkpoints.
+        yt_cache.mark_active(video_id)
         yt_cache.clear_other(video_id)
 
     try:
@@ -1375,6 +1378,9 @@ def _do_yt_analyze(job_id: str, url: str, criteria: str, api_key: str,
             "message": str(e),
             "elapsed": _elapsed(),
         }
+    finally:
+        if video_id:
+            yt_cache.mark_done(video_id)
 
 
 @app.post("/yt-clip/analyze")

@@ -616,3 +616,215 @@
   height: 100%;
   border: 0;
 }
+
+/* ── Inline time editor ────────────────────────────────── */
+.ytc-edit-btn {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: 0.78rem;
+  padding: 5px 11px;
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.ytc-clip-edit {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px;
+  background: rgba(255,255,255,0.02);
+}
+
+.ytc-edit-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.ytc-edit-edge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ytc-edit-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+
+.ytc-edit-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ytc-edit-input {
+  width: 92px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.35);
+  color: var(--text);
+}
+
+.ytc-edit-input:focus {
+  outline: none;
+  border-color: var(--accent, #4ade80);
+}
+
+.ytc-nudge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ytc-edit-hint {
+  margin: 10px 0 0;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+}
+
+.ytc-reset-btn {
+  margin-top: 10px;
+  font-size: 0.74rem;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Multi-session ───────────────────────────── */
+.ytc-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.ytc-running-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(96,165,250,0.12);
+  color: var(--accent);
+  border: 1px solid rgba(96,165,250,0.3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ytc-session-count {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.ytc-session {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface2);
+  overflow: hidden;
+}
+
+.ytc-session-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 18px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface3);
+  border-bottom: 1px solid var(--border);
+}
+.ytc-session--collapsed .ytc-session-head { border-bottom: none; }
+.ytc-session-head:hover { background: var(--surface); }
+
+.ytc-session-head-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.ytc-session-caret {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.ytc-session-num {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ytc-session-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ytc-session-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ytc-session-chip {
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ytc-session-chip--run  { background: rgba(96,165,250,0.12); color: var(--accent); border: 1px solid rgba(96,165,250,0.3); }
+.ytc-session-chip--ok   { background: var(--surface); color: var(--text-dim); border: 1px solid var(--border); }
+.ytc-session-chip--done { background: rgba(74,222,128,0.12); color: var(--success); border: 1px solid rgba(74,222,128,0.3); }
+.ytc-session-chip--err  { background: rgba(248,113,113,0.12); color: var(--error); border: 1px solid rgba(248,113,113,0.3); }
+
+.ytc-session-remove {
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  opacity: 0.6;
+}
+.ytc-session-remove:hover { opacity: 1; color: var(--error); }
+
+.ytc-session-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.ytc-add-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0 4px;
+}
+
+.ytc-add-session-btn {
+  font-size: 0.9rem;
+}
+
+.ytc-add-hint {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: 0;
+  text-align: center;
+}

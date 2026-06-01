@@ -22,6 +22,7 @@ API:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -31,6 +32,35 @@ from logger import get_logger
 log = get_logger("yt_cache")
 
 CACHE_DIR = Path(__file__).resolve().parent.parent / ".yt_cache"
+
+# ── In-flight video registry ──────────────────────────────────
+# Multiple analyze jobs can run concurrently (3+ streams at once). The
+# single-slot wipe (`clear_other`) must NOT delete the checkpoint of a video
+# that is still being processed by another job. We track active video_ids here
+# and always preserve them during a wipe.
+_active_lock = threading.Lock()
+_active_video_ids: set[str] = set()
+
+
+def mark_active(video_id: str) -> None:
+    """Register a video_id as currently being processed."""
+    if not video_id:
+        return
+    with _active_lock:
+        _active_video_ids.add(video_id)
+
+
+def mark_done(video_id: str) -> None:
+    """Unregister a video_id once its job finished (success or error)."""
+    if not video_id:
+        return
+    with _active_lock:
+        _active_video_ids.discard(video_id)
+
+
+def _active_snapshot() -> set[str]:
+    with _active_lock:
+        return set(_active_video_ids)
 
 
 def _ensure_dir() -> None:
@@ -105,9 +135,13 @@ def clear_other(video_id: str) -> int:
     """
     if not CACHE_DIR.exists():
         return 0
+    # Never wipe checkpoints for videos still being processed by other
+    # concurrent jobs (multi-session). Keep this id + all in-flight ids.
+    keep = _active_snapshot()
+    keep.add(video_id)
     removed = 0
     for p in CACHE_DIR.glob("*.json"):
-        if p.stem == video_id:
+        if p.stem in keep:
             continue
         try:
             p.unlink()
